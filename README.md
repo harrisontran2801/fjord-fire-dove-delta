@@ -4,30 +4,38 @@
   <img src="assets/quench-studio.gif" alt="Quench Studio labeled demo: privacy switch on, match-engine sample, Analyze to Report, p99 86 µs to 74 µs, Demo data and Modeled result" />
 </p>
 
-**Quench is a local Linux x86_64 optimization pilot** that measures a real baseline, applies conservative passes, runs the project’s existing tests and benchmarks, and keeps a candidate only when those gates pass.
+**Local Linux x86_64 optimization pilot** for binaries and containers.
 
-[Live Studio](https://harrisontran2801.github.io/fjord-fire-dove-delta/studio/) · [Pilot guide](PILOT.md) · [Pilot checklist](PILOT_CHECKLIST.md) · [Setup](SETUP.md)
+Quench measures a real baseline, applies conservative passes, runs the project’s existing tests and benchmarks, and keeps a candidate only when those gates pass. Commands and artifact hashes are recorded. Workload data stays on the machine that ran it.
 
-[Full intro (WebM)](assets/quench-studio.webm) · [MP4](assets/quench-studio.mp4)
+[Live Studio](https://harrisontran2801.github.io/fjord-fire-dove-delta/studio/) · [Pilot guide](PILOT.md) · [Pilot checklist](PILOT_CHECKLIST.md) · [Setup](SETUP.md) · [Privacy](SETUP.md#inspection-privacy)
 
-## What the public Studio is
+[Intro (WebM)](assets/quench-studio.webm) · [MP4](assets/quench-studio.mp4) · [Poster](assets/quench-studio-poster.png)
 
-The GitHub Pages Studio is a **labeled demo and inspection workbench**. Sample cards play modeled data. They are not native measurements, not a live optimize, and not a performance certificate.
+## Who this is for
 
-Native optimize runs only through the local agent on **Linux x86_64**. Windows and macOS are not supported for native optimize. Missing tools are reported as Unavailable — Quench does not invent metrics.
+SRE, platform, and systems teams that own a hot Linux x86_64 binary or container, already have tests and benches, and will not accept an optimizer that invents numbers.
 
-## Demo walkthrough (this preview)
+## What is real vs demo
 
-The 46-second clip above is the public Studio UI:
+| In Studio | What it is |
+| --- | --- |
+| **Demo data / Modeled result** | Sample cards, including match-engine p99 **86 µs → 74 µs**. Product demonstration only. |
+| **Inspection only** | ELF / Docker / OCI identified from file bytes. No optimizer, no fabricated benchmarks. Deleted after checking by default. |
+| **Native agent** | Local Linux x86_64 run of `quench-agent optimize`. Real commands, hashes, and keep/reject gates. |
 
-1. Landing
-2. Privacy switch **on** by default — *Delete inspection data after checking (recommended)*
-3. `match-engine` sample
-4. Pipeline from Analyze to Report
-5. Modeled p99 **86 µs → 74 µs** (demo data, not a native run)
+Public GitHub Pages is demo + inspection. Native optimize needs the local agent.
 
-Captions: *Measure the baseline* · *Apply safe optimization passes* · *Verify correctness* · *Keep only measured improvements* · *Local-first and privacy-aware*
+## What Quench does not claim
+
+- Windows or macOS native optimize
+- Cloud execution or a hosted SaaS
+- Certified or ISO performance
+- Savings or speedups before measurement
+- Docker/OCI image rewrite (inspect only today)
+
+Missing tools (`perf`, `llvm-bolt`, …) are reported **Unavailable**. A strip-only candidate is often **rejected** when it misses the improvement gate — that is the product working.
 
 ## Native pilots
 
-For a real gated run on Linux x86_64, start with [PILOT.md](PILOT.md) and tick [PILOT_CHECKLIST.md](PILOT_CHECKLIST.md). The bundled sample is `samples/match-engine/quench.yaml`.
+On a Linux x86_64 host, start with [PILOT.md](PILOT.md) and tick [PILOT_CHECKLIST.md](PILOT_CHECKLIST.md). Bundled sample: [`samples/match-engine/quench.yaml`](samples/match-engine/quench.yaml).

@@ -50,17 +50,11 @@ function Home() {
                 After the vibe, the proof.
               </h1>
               <p className="mt-5 max-w-xl text-base text-muted sm:text-lg">
-                AI writes software in hours. Quench runs a reproducible local optimization
-                pipeline — build, test, transform, re-test, benchmark — on your machine.
+                AI writes software in hours. Quench is a local Linux x86_64
+                optimization pilot — build, test, transform, re-test, benchmark —
+                on your machine. Public Studio is a labeled demo until the agent
+                is connected.
               </p>
-              {agent && !agent.connected ? (
-                <p className="mt-4 max-w-xl text-sm text-warn">
-                  The local agent is not connected, so this preview is not a live optimizer.
-                  Sample numbers below are modeled. File drops only identify ELF / Docker / OCI
-                  bytes (inspection only). Install Rust and run `npm run agent:serve` if you want
-                  the native pipeline.
-                </p>
-              ) : null}
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Button asChild size="lg">
                   <Link to="/studio">

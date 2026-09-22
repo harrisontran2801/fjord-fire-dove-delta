@@ -6,8 +6,6 @@ Two processes: the web studio, and an optional native agent.
 
 ## Web studio
 
-## Web studio
-
 ```sh
 npm run dev
 ```

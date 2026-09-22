@@ -50,8 +50,8 @@ export function Footer() {
   return (
     <footer className="border-t border-border">
       <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-8 text-xs text-subtle sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <p>Quench · local-first optimization · binaries never leave this machine</p>
-        <p>Free local studio · CI minutes for teams</p>
+        <p>Quench · local Linux x86_64 pilot · binaries stay on this machine</p>
+        <p>Not a SaaS. Native optimize needs the local agent.</p>
       </div>
     </footer>
   );

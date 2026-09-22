@@ -18,11 +18,17 @@ import {
 import { artifactFromFile, artifactFromNativeReport } from "@/lib/quench/engine";
 import { formatBytes, relativeTime } from "@/lib/quench/format";
 import { useQuenchStore } from "@/lib/quench/store";
-import type { Artifact, ParetoPref } from "@/lib/quench/types";
+import type { Artifact, ParetoPref, Run } from "@/lib/quench/types";
 import { runStatusLabel } from "@/lib/quench/engine";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/studio/")({ component: StudioPage });
+
+function runModeLabel(mode: Run["mode"]): string {
+  if (mode === "demo") return DEMO_LABEL;
+  if (mode === "inspect") return INSPECTION_ONLY_LABEL;
+  return "Native agent";
+}
 
 function StudioPage() {
   const navigate = useNavigate();
@@ -161,9 +167,10 @@ function StudioPage() {
                 type="button"
                 onClick={() => setPreference(key)}
                 className={cn(
-                  "h-10 rounded-md px-3 text-sm transition-colors duration-150",
+                  "h-11 rounded-md px-3 text-sm transition-colors duration-150",
                   preference === key ? "bg-accent text-accent-fg" : "text-muted hover:text-fg",
                 )}
+                aria-pressed={preference === key}
               >
                 {PREF_COPY[key].label}
               </button>
@@ -202,10 +209,7 @@ function StudioPage() {
                 )}
               </Button>
             ) : (
-              <p className="max-w-sm text-xs text-muted">
-                Native sample is unavailable until the local agent is connected. Demo cards and
-                inspection still work.
-              </p>
+              <p className="max-w-sm text-xs text-muted">Requires the local agent.</p>
             )}
           </div>
           {nativeError ? (
@@ -339,7 +343,7 @@ function StudioPage() {
               key={s.id}
               type="button"
               onClick={() => launch(s)}
-              className="rounded-xl bg-surface p-4 text-left shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 hover:shadow-[var(--shadow-border-hover)]"
+              className="min-h-11 rounded-xl bg-surface p-4 text-left shadow-[var(--shadow-border)] transition-[box-shadow] duration-150 hover:shadow-[var(--shadow-border-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
             >
               <div className="flex items-center justify-between">
                 {s.kind === "docker" ? (
@@ -373,7 +377,7 @@ function StudioPage() {
                   <Link to="/studio/$runId" params={{ runId: run.id }} className="min-h-11 min-w-0 flex-1">
                     <p className="truncate font-mono text-sm">{run.artifact.name}</p>
                     <p className="text-xs text-muted">
-                      {runStatusLabel(run)} · {run.mode} · {relativeTime(run.createdAt)}
+                      {runStatusLabel(run)} · {runModeLabel(run.mode)} · {relativeTime(run.createdAt)}
                     </p>
                   </Link>
                   <button
