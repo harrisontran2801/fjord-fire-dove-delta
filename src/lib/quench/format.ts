@@ -11,6 +11,11 @@ export function formatBytes(bytes: number): string {
 
 export function formatMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10_000 ? 1 : 2)} s`;
+  if (ms > 0 && ms < 1) {
+    const microseconds = ms * 1000;
+    if (microseconds >= 1) return `${Math.round(microseconds)} µs`;
+    return `${ms.toFixed(3)} ms`;
+  }
   return `${Math.round(ms)} ms`;
 }
 

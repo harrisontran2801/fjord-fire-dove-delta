@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { AGENT_UNAVAILABLE_HINT, type AgentStatus } from "@/lib/quench/agent";
+import type { AgentStatus } from "@/lib/quench/agent";
 import type { Run } from "@/lib/quench/types";
 import { cn } from "@/lib/utils";
 
@@ -52,15 +52,12 @@ export function AgentBanner({ agent }: { agent: AgentStatus | null }) {
           </p>
         ) : (
           <p className="text-muted">
-            Agent unavailable. Studio will not pretend a pipeline is running. {AGENT_UNAVAILABLE_HINT}
+            Demo and inspection stay available. Native optimize needs the local agent — Studio will
+            not pretend a pipeline is running.
           </p>
         )}
       </div>
-      {!connected ? (
-        <p className="mt-2 font-mono text-xs text-subtle">{AGENT_UNAVAILABLE_HINT}</p>
-      ) : (
-        <DoctorStrip doctor={agent?.doctor ?? null} />
-      )}
+      {connected ? <DoctorStrip doctor={agent?.doctor ?? null} /> : null}
     </div>
   );
 }

@@ -8,7 +8,6 @@ import { AgentBanner } from "@/components/studio/agent-status";
 import { DEMO_LABEL, INSPECTION_ONLY_LABEL, PREF_COPY, SAMPLES } from "@/lib/quench/data";
 import {
   AGENT_CONNECT_HINT,
-  AGENT_UNAVAILABLE_HINT,
   nativeSampleConfig,
   agentInspect,
   agentOptimize,
@@ -204,7 +203,8 @@ function StudioPage() {
               </Button>
             ) : (
               <p className="max-w-sm text-xs text-muted">
-                Agent disconnected — studio stays in Demo / Inspection mode. {AGENT_UNAVAILABLE_HINT}
+                Native sample is unavailable until the local agent is connected. Demo cards and
+                inspection still work.
               </p>
             )}
           </div>

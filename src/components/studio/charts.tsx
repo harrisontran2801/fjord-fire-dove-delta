@@ -81,7 +81,7 @@ function PairBar({
               style={{ width: `${Math.min(100, (before / max) * 100)}%` }}
             />
           </div>
-          <span className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted">
+          <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted">
             {beforeLabel}
           </span>
         </div>
@@ -93,7 +93,7 @@ function PairBar({
               style={{ width: `${Math.min(100, (after / max) * 100)}%` }}
             />
           </div>
-          <span className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg">
+          <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-fg">
             {afterLabel}
           </span>
         </div>
