@@ -4,7 +4,8 @@ use crate::inspect::{inspect_path, inspect_to_json};
 use crate::pipeline::{load_run, optimize};
 use crate::security::{
     bind_is_loopback, cors_header_lines, default_sample_rel, host_allowed, mutating_origin_ok,
-    resolve_config_path, resolve_inspect_path, sample_config_path, workspace_root, ERR_HOST,
+    resolve_config_path, resolve_inspect_path, restrict_unix_socket, sample_config_path,
+    workspace_root, ERR_HOST,
 };
 use crate::util::{new_run_id, MAX_INSPECT_BYTES};
 use serde_json::json;
@@ -373,6 +374,7 @@ pub fn serve(bind: &str, socket: &str) -> Result<(), String> {
     let tcp = TcpListener::bind(bind).map_err(|e| format!("bind {bind}: {e}"))?;
     tcp.set_nonblocking(false).ok();
     let unix = UnixListener::bind(socket).map_err(|e| format!("bind unix {socket}: {e}"))?;
+    restrict_unix_socket(std::path::Path::new(socket))?;
     println!("quench-agent serve {bind} unix:{socket}");
     thread::spawn(move || {
         for conn in unix.incoming() {

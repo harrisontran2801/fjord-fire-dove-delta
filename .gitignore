@@ -3,3 +3,25 @@ node_modules/
 .github_repo
 .env
 .env.*
+
+# Rust / native build outputs
+agent/target/
+samples/**/target/
+**/target/
+*.rlib
+*.rmeta
+
+# Compiled agent binary (rebuild with npm run agent:build)
+quench-agent
+
+# Archives and generated artifacts
+attachments/
+*.zip
+dist/
+.output/
+.nitro/
+.tanstack/
+.vercel/
+artifacts/browsed_files/
+*.log
+*.sock

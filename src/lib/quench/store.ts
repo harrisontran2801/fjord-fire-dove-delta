@@ -28,6 +28,7 @@ interface QuenchState {
     transformsFailed: { tool: string; status: string; detail: string }[];
     runId?: string;
     agentStatus?: string;
+    ok?: boolean;
   }) => Run;
   markCompleteIfDue: (id: string) => void;
   setRunPreference: (id: string, p: ParetoPref) => void;

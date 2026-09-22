@@ -10,6 +10,16 @@ npm run dev
 
 The UI always loads. If the agent is down, Studio shows **Local agent not connected** and stays in Demo / Inspection mode. It does not invent a live pipeline.
 
+Startup scripts resolve the repository root from their own location. They do not assume `/workspace`. Override with:
+
+| Variable | Default |
+| --- | --- |
+| `QUENCH_WORKSPACE` | directory that contains `startup.sh` |
+| `QUENCH_SAMPLE_CONFIG` | `samples/match-engine/quench.yaml` (relative to the workspace) |
+| `QUENCH_AGENT_BIN` | `$ROOT/agent/target/release/quench-agent` |
+| `QUENCH_AGENT_SOCKET` | `/tmp/quench-agent.sock` |
+| `QUENCH_AGENT_BIND` | `127.0.0.1:4783` (loopback only) |
+
 ## Native agent (Linux x86_64)
 
 Requires Rust (`cargo`, `rustc`). If they are missing, skip this section — the UI will show an unavailable state.
@@ -22,14 +32,18 @@ npm run agent:serve
 # or:  ./agent/target/release/quench-agent serve --bind 127.0.0.1:4783
 ```
 
-The agent binds **loopback only** (`127.0.0.1:4783`) and a unix socket (`/tmp/quench-agent.sock`). Browser requests from unknown origins are rejected. `configPath` must resolve to a file inside `QUENCH_WORKSPACE`.
-
 ```sh
 npm run agent:doctor
 quench-agent optimize --config samples/match-engine/quench.yaml
 ```
 
-The match-engine sample stays at `samples/match-engine/`. Point `QUENCH_SAMPLE_CONFIG` at another in-workspace `quench.yaml` if you want a different native sample.
+The match-engine sample stays at `samples/match-engine/` and is the **default** native sample only. Point `QUENCH_SAMPLE_CONFIG` at another in-workspace `quench.yaml` if you want a different native sample. Studio labels the run from the native report (`project`, artifact path, kind, size, hashes), not from a hard-coded match-engine card.
+
+## Local agent security
+
+The agent binds **loopback only** (`127.0.0.1:4783`) and a unix socket (`QUENCH_AGENT_SOCKET`, default `/tmp/quench-agent.sock`) with owner-only permissions (`0600`). Browser requests from unknown origins are rejected. `configPath` and inspect paths must resolve to a file inside `QUENCH_WORKSPACE`. CORS is never `*`.
+
+Origin allowlisting and CORS are **not authentication**. TCP mutation endpoints (`POST /v1/optimize`, `POST /v1/inspect`) stay reachable without credentials on loopback so the local CLI and the Vite unix-socket proxy can call them. Any process on this machine can still POST to `127.0.0.1:4783` if it omits `Origin` (or sends an allowlisted one). Do not expose the agent beyond loopback.
 
 ## Uploads
 

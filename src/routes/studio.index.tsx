@@ -5,17 +5,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Shell } from "@/components/layout/shell";
 import { AgentBanner } from "@/components/studio/agent-status";
-import { DEMO_LABEL, INSPECTION_ONLY_LABEL, PREF_COPY, SAMPLE_BY_ID, SAMPLES } from "@/lib/quench/data";
+import { DEMO_LABEL, INSPECTION_ONLY_LABEL, PREF_COPY, SAMPLES } from "@/lib/quench/data";
 import {
   AGENT_CONNECT_HINT,
   AGENT_UNAVAILABLE_HINT,
   nativeSampleConfig,
   agentInspect,
   agentOptimize,
+  isNativeOptimizeFailure,
   probeAgent,
   type AgentStatus,
 } from "@/lib/quench/agent";
-import { artifactFromFile } from "@/lib/quench/engine";
+import { artifactFromFile, artifactFromNativeReport } from "@/lib/quench/engine";
 import { formatBytes, relativeTime } from "@/lib/quench/format";
 import { useQuenchStore } from "@/lib/quench/store";
 import type { Artifact, ParetoPref } from "@/lib/quench/types";
@@ -102,27 +103,27 @@ function StudioPage() {
     setNativeError(null);
     setNativeBusy(true);
     try {
-      const result = await agentOptimize(nativeSampleConfig(agent), agent);
-      if (!result.runId) {
-        setNativeError(result.error ?? "Native optimize did not return a run.");
+      const configPath = nativeSampleConfig(agent);
+      const result = await agentOptimize(configPath, agent);
+      const failed = isNativeOptimizeFailure(result);
+      if (failed && !result.runId) {
+        setNativeError(result.error ?? "Native optimize failed.");
         return;
       }
-      const sample = SAMPLE_BY_ID["match-engine"];
-      if (!sample) {
-        setNativeError("match-engine sample is missing from the studio.");
-        return;
-      }
-      const size =
-        Number(result.report.artifactSize?.baselineBytes) || sample.sizeBytes;
+      const artifact = artifactFromNativeReport(result.report, configPath);
       const run = startAgentRun({
-        artifact: { ...sample, sizeBytes: size, source: "agent" },
+        artifact,
         report: result.report,
         logs: result.logs,
         transformsApplied: result.transformsApplied,
         transformsFailed: result.transformsFailed,
         runId: result.runId,
         agentStatus: result.status,
+        ok: result.ok,
       });
+      if (failed) {
+        setNativeError(result.error ?? "Native optimize failed.");
+      }
       void navigate({ to: "/studio/$runId", params: { runId: run.id } });
     } catch (err) {
       setNativeError(
@@ -175,13 +176,15 @@ function StudioPage() {
         <div className="mt-4 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium">Native match-engine sample</p>
+              <p className="text-sm font-medium">Native sample</p>
               <p className="mt-1 text-xs text-muted">
                 Runs the real agent against{" "}
                 <span className="font-mono">{nativeSampleConfig(agent)}</span> inside{" "}
                 <span className="font-mono">{agent?.workspace ?? "QUENCH_WORKSPACE"}</span>.
-                Override with <span className="font-mono">QUENCH_SAMPLE_CONFIG</span>. Uploaded files
-                are never treated as this project.
+                Default sample is match-engine. Override with{" "}
+                <span className="font-mono">QUENCH_SAMPLE_CONFIG</span> — Studio uses the native
+                report identity, not a hard-coded card. Uploaded files are never treated as this
+                project.
               </p>
             </div>
             {connected ? (

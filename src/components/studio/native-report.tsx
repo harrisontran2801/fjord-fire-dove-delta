@@ -65,6 +65,9 @@ export function NativeFacts({ run }: { run: Run }) {
       <p className="text-xs uppercase tracking-wider text-subtle">Native optimization report</p>
       <dl className="mt-3 space-y-3">
         <Fact label="Status" value={run.status.replaceAll("_", " ")} />
+        <Fact label="Project" value={n.project ?? run.artifact.name} />
+        <Fact label="Kind" value={n.kind ?? run.artifact.kind} />
+        <Fact label="Input path" value={n.inputPath ?? run.artifact.tag} mono />
         <Fact label="Run ID" value={run.id} mono />
         <Fact label="Candidate" value={kept ? "Kept" : "Not kept"} />
         {n.reason ? <Fact label="Why" value={n.reason} /> : null}
@@ -188,10 +191,32 @@ export function NativeReportArticle({ run }: { run: Run }) {
     <article className="mt-4 rounded-2xl bg-surface p-6 shadow-[var(--shadow-border)] sm:p-10">
       <div className="flex items-start justify-between gap-4">
         <p className="text-xs uppercase tracking-[0.18em] text-subtle">Local optimization report</p>
-        <Badge variant={kept ? "signal" : "warn"}>{kept ? "Candidate kept" : "Candidate not kept"}</Badge>
+        <Badge
+          variant={
+            run.status === "failed" || run.status === "verification_failed"
+              ? "danger"
+              : kept
+                ? "signal"
+                : "warn"
+          }
+        >
+          {run.status === "failed" || run.status === "verification_failed"
+            ? run.status === "verification_failed"
+              ? "Tests failed"
+              : "Failed"
+            : kept
+              ? "Candidate kept"
+              : "Candidate not kept"}
+        </Badge>
       </div>
-      <h1 className="mt-3 font-display text-3xl font-semibold">{run.id}</h1>
+      <h1 className="mt-3 font-display text-3xl font-semibold">{run.artifact.name}</h1>
+      <p className="mt-1 font-mono text-xs text-subtle">{run.id}</p>
       <p className="mt-4 text-muted">{run.result.summary}</p>
+      {run.status === "failed" || run.status === "verification_failed" ? (
+        <p role="alert" className="mt-2 text-sm text-danger">
+          {n.error ?? "The native agent reported a failed run."}
+        </p>
+      ) : null}
       <p className="mt-2 text-sm">Status: {run.status.replaceAll("_", " ")}</p>
 
       <dl className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">

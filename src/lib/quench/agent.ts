@@ -1,5 +1,5 @@
-import { artifactFromInspection, FILE_TOO_LARGE, inspectFile, MAX_UPLOAD_BYTES } from "./inspect";
-import type { AgentDoctor, Artifact, NativeReport } from "./types";
+import { artifactFromInspection, FILE_TOO_LARGE, inspectFile, MAX_UPLOAD_BYTES } from "./inspect.ts";
+import type { AgentDoctor, Artifact, NativeReport } from "./types.ts";
 
 const PROXY = "/api/agent";
 const DIRECT = "http://127.0.0.1:4783";
@@ -160,45 +160,198 @@ export interface AgentOptimizeResult {
   error?: string;
 }
 
-export async function agentOptimize(configPath: string, status: AgentStatus): Promise<AgentOptimizeResult> {
-  if (!status.connected) {
-    return {
-      ok: false,
-      runId: "",
-      status: "failed",
-      report: {},
-      logs: [],
-      transformsApplied: [],
-      transformsFailed: [],
-      error: AGENT_UNAVAILABLE_HINT,
-    };
-  }
-  const res = await fetch(`${baseFor(status)}/v1/optimize`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ configPath }),
-    signal: AbortSignal.timeout(10 * 60 * 1000),
-  });
-  const body = (await res.json()) as {
-    run_id?: string;
-    runId?: string;
-    status?: string;
-    report?: NativeReport & Record<string, unknown>;
-    logs?: string[];
-    transforms_applied?: { tool: string; status: string; detail: string }[];
-    transforms_failed?: { tool: string; status: string; detail: string }[];
-    ok?: boolean;
-    error?: string;
-  };
-  const report = body.report ?? {};
+function failedOptimize(
+  error: string,
+  extra?: Partial<AgentOptimizeResult>,
+): AgentOptimizeResult {
   return {
-    ok: Boolean(report.ok ?? body.status === "complete"),
-    runId: body.run_id ?? body.runId ?? "",
-    status: body.status ?? "failed",
-    report,
-    logs: body.logs ?? [],
-    transformsApplied: body.transforms_applied ?? report.transformsApplied ?? [],
-    transformsFailed: body.transforms_failed ?? report.transformsFailed ?? [],
-    error: body.error ?? (typeof report.error === "string" ? report.error : undefined),
+    ok: false,
+    runId: extra?.runId ?? "",
+    status: extra?.status ?? "failed",
+    report: extra?.report ?? {},
+    logs: extra?.logs ?? [],
+    transformsApplied: extra?.transformsApplied ?? [],
+    transformsFailed: extra?.transformsFailed ?? [],
+    error,
   };
 }
+
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function httpErrorMessage(status: number, bodyError?: string): string {
+  if (bodyError) {
+    if (status === 403) return `Forbidden (403): ${bodyError}`;
+    if (status === 404) return `Not found (404): ${bodyError}`;
+    if (status === 502) return `Bad gateway (502): ${bodyError}`;
+    return `Agent request failed (${status}): ${bodyError}`;
+  }
+  if (status === 403) return "The local agent rejected this request (403 Forbidden).";
+  if (status === 404) return "The local agent endpoint was not found (404).";
+  if (status === 502) return "The local agent proxy returned a bad gateway (502).";
+  return `The local agent returned HTTP ${status}.`;
+}
+
+function fetchErrorMessage(err: unknown): string {
+  const name =
+    err && typeof err === "object" && "name" in err ? String((err as { name: string }).name) : "";
+  const message = err instanceof Error ? err.message : "";
+  if (name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(message)) {
+    return "The local agent timed out while running optimize.";
+  }
+  return "Could not reach the local agent. " + AGENT_CONNECT_HINT;
+}
+
+function normalizeStatus(raw: unknown): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+}
+
+function isOptimizeShape(body: Record<string, unknown>): boolean {
+  const report = asRecord(body.report);
+  const status = asString(body.status) ?? (report ? asString(report.status) : undefined);
+  const hasRunId = Boolean(asString(body.run_id) ?? asString(body.runId));
+  const hasOk = typeof body.ok === "boolean" || (report && typeof report.ok === "boolean");
+  return Boolean(status || report || hasRunId || hasOk);
+}
+
+function transformsOf(
+  value: unknown,
+): { tool: string; status: string; detail: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const rec = asRecord(item);
+    if (!rec) return [];
+    return [
+      {
+        tool: String(rec.tool ?? ""),
+        status: String(rec.status ?? ""),
+        detail: String(rec.detail ?? ""),
+      },
+    ];
+  });
+}
+
+/** True when a native optimize response must not be shown as complete/successful. */
+export function isNativeOptimizeFailure(result: AgentOptimizeResult): boolean {
+  const status = normalizeStatus(result.status);
+  if (result.ok === false) return true;
+  if (status === "failed" || status === "verification_failed") return true;
+  if (result.report.ok === false) return true;
+  return false;
+}
+
+export async function agentOptimize(
+  configPath: string,
+  status: AgentStatus,
+  timeoutMs = 10 * 60 * 1000,
+): Promise<AgentOptimizeResult> {
+  if (!status.connected) {
+    return failedOptimize(AGENT_UNAVAILABLE_HINT);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseFor(status)}/v1/optimize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configPath }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    return failedOptimize(fetchErrorMessage(err));
+  }
+
+  let text = "";
+  try {
+    text = await res.text();
+  } catch (err) {
+    return failedOptimize(fetchErrorMessage(err));
+  }
+
+  const parsed = tryParseJson(text);
+  const body = asRecord(parsed);
+  const bodyError = body ? asString(body.error) : undefined;
+
+  if (!res.ok) {
+    return failedOptimize(httpErrorMessage(res.status, bodyError));
+  }
+
+  if (parsed === undefined) {
+    return failedOptimize("The agent returned a non-JSON response.");
+  }
+  if (!body) {
+    return failedOptimize("The agent response was missing the expected status/report shape.");
+  }
+  if (!isOptimizeShape(body)) {
+    return failedOptimize("The agent response was missing the expected status/report shape.");
+  }
+
+  const reportRec = asRecord(body.report) ?? {};
+  const report = {
+    ...reportRec,
+    project: reportRec.project ?? body.project,
+    kind: reportRec.kind ?? body.kind,
+    inputPath: reportRec.inputPath ?? body.input_path ?? body.inputPath,
+    configPath: reportRec.configPath ?? body.config_path ?? body.configPath ?? configPath,
+    ok: reportRec.ok ?? body.ok,
+    error: reportRec.error ?? body.error,
+  } as NativeReport & Record<string, unknown>;
+
+  const runStatus = normalizeStatus(body.status ?? report.status) || "failed";
+  const runId = asString(body.run_id) ?? asString(body.runId) ?? asString(report.runId) ?? "";
+  const logs = Array.isArray(body.logs)
+    ? body.logs.map((line) => String(line))
+    : Array.isArray(report.logs)
+      ? (report.logs as unknown[]).map((line) => String(line))
+      : [];
+  const appliedFinal = transformsOf(body.transforms_applied).length
+    ? transformsOf(body.transforms_applied)
+    : transformsOf(report.transformsApplied);
+  const failedFinal = transformsOf(body.transforms_failed).length
+    ? transformsOf(body.transforms_failed)
+    : transformsOf(report.transformsFailed);
+
+  const pipelineFailed =
+    body.ok === false ||
+    report.ok === false ||
+    runStatus === "failed" ||
+    runStatus === "verification_failed";
+
+  const error =
+    asString(body.error) ??
+    (typeof report.error === "string" ? report.error : undefined) ??
+    (typeof report.reason === "string" && pipelineFailed ? report.reason : undefined);
+
+  return {
+    ok: !pipelineFailed,
+    runId,
+    status: runStatus,
+    report,
+    logs,
+    transformsApplied: appliedFinal,
+    transformsFailed: failedFinal,
+    error: pipelineFailed
+      ? (error ?? "Native optimize failed.")
+      : error,
+  };
+}
+

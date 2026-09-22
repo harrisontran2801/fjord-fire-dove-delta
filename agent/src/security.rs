@@ -44,6 +44,9 @@ pub fn origin_allowed(origin: &str) -> bool {
 
 /// Browser POSTs always send Origin. Unknown origins are rejected.
 /// A missing Origin is allowed for the local CLI and the unix-socket proxy hop.
+///
+/// This is origin allowlisting, not authentication. Any local process can still
+/// call loopback TCP mutation endpoints without an Origin header.
 pub fn mutating_origin_ok(origin: Option<&str>) -> Result<(), String> {
     match origin.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(()),
@@ -88,6 +91,18 @@ pub fn bind_is_loopback(bind: &str) -> bool {
         || trimmed == "127.0.0.1"
         || trimmed == "localhost"
         || trimmed == "[::1]"
+}
+
+/// Owner-only access on the unix socket (0600). Loopback TCP is still reachable
+/// by other local processes; the socket must not be world-writable.
+pub fn restrict_unix_socket(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+        format!(
+            "could not set unix socket permissions on {}: {e}",
+            path.display()
+        )
+    })
 }
 
 fn looks_like_workspace(dir: &Path) -> bool {
@@ -293,6 +308,23 @@ mod tests {
         assert!(bind_is_loopback("localhost:4783"));
         assert!(!bind_is_loopback("0.0.0.0:4783"));
         assert!(!bind_is_loopback("[::]:4783"));
+    }
+
+    #[test]
+    fn unix_socket_permissions_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        let sock = std::env::temp_dir().join(format!(
+            "quench-sock-mode-{}-{}.sock",
+            std::process::id(),
+            crate::util::now_ms()
+        ));
+        let _ = std::fs::remove_file(&sock);
+        let _listener = UnixListener::bind(&sock).unwrap();
+        restrict_unix_socket(&sock).unwrap();
+        let mode = std::fs::metadata(&sock).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "unix socket mode was {mode:o}");
+        let _ = std::fs::remove_file(&sock);
     }
 
     #[test]

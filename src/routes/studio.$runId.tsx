@@ -134,9 +134,11 @@ function RunPage() {
                 variant={
                   run.status === "running"
                     ? "accent"
-                    : agentRun && run.status !== "complete"
-                      ? "warn"
-                      : "signal"
+                    : agentRun && (run.status === "failed" || run.status === "verification_failed")
+                      ? "danger"
+                      : agentRun && run.status !== "complete"
+                        ? "warn"
+                        : "signal"
                 }
               >
                 {statusLabel}
@@ -167,6 +169,20 @@ function RunPage() {
           ) : null}
         </div>
 
+        {agentRun && (run.status === "failed" || run.status === "verification_failed") ? (
+          <div
+            role="alert"
+            className="mt-4 rounded-xl bg-danger/10 px-4 py-3 text-sm text-danger shadow-[var(--shadow-border)]"
+          >
+            <p className="font-medium">
+              {run.status === "verification_failed" ? "Verification failed" : "Native optimize failed"}
+            </p>
+            <p className="mt-1">
+              {run.result.native?.error ?? run.result.summary ?? "The native agent reported a failed run."}
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-6">
           <div className="mb-3 flex items-center justify-between text-xs text-muted">
             <span>
@@ -175,7 +191,9 @@ function RunPage() {
                 : demo
                   ? "Demo pipeline complete"
                   : agentRun
-                    ? "Native pipeline finished"
+                    ? run.status === "failed" || run.status === "verification_failed"
+                      ? "Native pipeline failed"
+                      : "Native pipeline finished"
                     : "Inspection complete"}
             </span>
             <span className="tabular-nums">{Math.round(overall * 100)}%</span>
@@ -465,8 +483,6 @@ function VerifyPanel({ run }: { run: Run }) {
       </Card>
     </section>
   );
-}
-
 }
 
 function ProvePanel({ run, onOpenCert }: { run: Run; onOpenCert: () => void }) {

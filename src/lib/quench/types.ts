@@ -155,6 +155,11 @@ export interface NativeReport {
   error?: string;
   ok?: boolean;
   logs?: string[];
+  project?: string;
+  kind?: string;
+  configPath?: string;
+  status?: string;
+  runId?: string;
 }
 
 export interface RunResult {

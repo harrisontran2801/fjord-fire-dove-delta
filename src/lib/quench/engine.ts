@@ -1,7 +1,8 @@
-import { AGENT_PIPELINE, INSPECT_PIPELINE, PIPELINE, SAMPLES, TEMPLATES } from "./data";
-import { certIdFrom, formatBytes, hashString } from "./format";
+import { AGENT_PIPELINE, INSPECT_PIPELINE, PIPELINE, SAMPLES, TEMPLATES } from "./data.ts";
+import { certIdFrom, formatBytes, hashString } from "./format.ts";
 import type {
   Artifact,
+  ArtifactKind,
   Metrics,
   NativeReport,
   ParetoPref,
@@ -11,9 +12,9 @@ import type {
   RunStatus,
   StageDef,
   StageId,
-} from "./types";
+} from "./types.ts";
 
-export { artifactFromFile } from "./inspect";
+export { artifactFromFile } from "./inspect.ts";
 
 const EMPTY_METRICS: Metrics = {
   artifactBytes: 0,
@@ -191,6 +192,69 @@ export function newRunId(): string {
   return `qnch_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function pathBasename(path: string): string {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const parts = trimmed.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+}
+
+/** Identity for a native run, taken from the agent report — never a hard-coded sample card. */
+export function artifactFromNativeReport(
+  report: NativeReport & Record<string, unknown>,
+  configPath = "",
+): Artifact {
+  const project = String(report.project ?? "").trim();
+  const inputPath = String(report.inputPath ?? "").trim();
+  const cfg = String(report.configPath ?? configPath ?? "").trim();
+  const kindRaw = String(report.kind ?? "elf").toLowerCase();
+  const kind: ArtifactKind = kindRaw === "docker" || kindRaw === "oci" ? kindRaw : "elf";
+  const fileName = pathBasename(inputPath);
+  const configStem = pathBasename(cfg).replace(/\.ya?ml$/i, "");
+  const name = project || fileName || configStem || "native-project";
+  const size = Number(report.artifactSize?.baselineBytes) || 0;
+  const sha = report.baselineSha256 ? String(report.baselineSha256) : undefined;
+  const rustVer = report.toolVersions?.rustc?.version;
+  const language = rustVer
+    ? `Rust ${String(rustVer).replace(/^rustc\s+/i, "").split(/\s+/)[0]}`
+    : kind === "elf"
+      ? "ELF"
+      : kind === "oci"
+        ? "OCI"
+        : "Docker";
+  return {
+    id: `agent:${name}`,
+    name,
+    subtitle: inputPath || cfg || "Native agent run",
+    kind,
+    language,
+    tag: inputPath || cfg || name,
+    customer: "Local agent",
+    sizeBytes: size,
+    source: "agent",
+    sha256: sha,
+  };
+}
+
+export function nativeRunStatus(args: {
+  agentStatus?: string;
+  ok?: boolean;
+  report: NativeReport;
+}): RunStatus {
+  const status = String(args.agentStatus ?? args.report.status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const ok = args.ok !== false && args.report.ok !== false;
+  if (status === "verification_failed") return "verification_failed";
+  if (status === "failed" || !ok) {
+    const test = String(args.report.testResult ?? "").toLowerCase();
+    if (test.includes("fail")) return "verification_failed";
+    return "failed";
+  }
+  if (status === "running") return "running";
+  return "complete";
+}
+
 export function createRun(artifact: Artifact, preference: ParetoPref): Run {
   const now = Date.now();
   const mode = runModeFor(artifact);
@@ -214,6 +278,7 @@ export function createAgentRun(args: {
   transformsFailed: { tool: string; status: string; detail: string }[];
   runId?: string;
   agentStatus?: string;
+  ok?: boolean;
 }): Run {
   const now = Date.now();
   const id = args.runId && args.runId.length > 0 ? args.runId : newRunId();
@@ -222,20 +287,8 @@ export function createAgentRun(args: {
   const sizeAfter = kept
     ? (args.report.artifactSize?.candidateBytes ?? sizeBefore)
     : sizeBefore;
-  const medBefore = args.report.medianMs?.baseline ?? 0;
-  const medAfter = kept ? (args.report.medianMs?.candidate ?? medBefore) : medBefore;
   const p95Before = args.report.p95Ms?.baseline ?? 0;
   const p95After = kept ? (args.report.p95Ms?.candidate ?? p95Before) : p95Before;
-  const metricsBefore: Metrics = {
-    ...EMPTY_METRICS,
-    artifactBytes: Number(sizeBefore) || 0,
-    p99Ms: Number(p95Before) || 0,
-  };
-  const metricsAfter: Metrics = {
-    ...EMPTY_METRICS,
-    artifactBytes: Number(sizeAfter) || 0,
-    p99Ms: Number(p95After) || 0,
-  };
   const stageLines: Record<string, string[]> = {
     analyze: [],
     rebuild: [],
@@ -282,20 +335,18 @@ export function createAgentRun(args: {
     maxRegressionPercent: args.report.maxRegressionPercent,
     medianImprovementPercent: args.report.medianImprovementPercent,
     error: args.report.error ? String(args.report.error) : undefined,
-    ok: args.report.ok,
+    ok: args.ok === false ? false : args.report.ok,
+    project: args.report.project ? String(args.report.project) : undefined,
+    kind: args.report.kind ? String(args.report.kind) : args.artifact.kind,
+    configPath: args.report.configPath ? String(args.report.configPath) : undefined,
+    status: args.agentStatus,
+    runId: id,
   };
-  const status: RunStatus =
-    args.agentStatus === "verification_failed"
-      ? "verification_failed"
-      : args.agentStatus === "complete" && args.report.ok !== false
-        ? "complete"
-        : args.report.keptCandidate
-          ? "complete"
-          : args.agentStatus === "failed" || args.report.ok === false
-            ? args.report.testResult?.toLowerCase().includes("fail")
-              ? "verification_failed"
-              : "failed"
-            : "complete";
+  const status: RunStatus = nativeRunStatus({
+    agentStatus: args.agentStatus,
+    ok: args.ok,
+    report: native,
+  });
 
   const result: RunResult = {
     before: metricsBefore,
@@ -422,7 +473,7 @@ export function isInspect(run: Run): boolean {
 export function runStatusLabel(run: Run): string {
   if (run.mode === "agent") {
     if (run.status === "verification_failed") return "Tests failed";
-    if (run.status === "failed") return "Candidate not kept";
+    if (run.status === "failed") return "Failed";
     if (run.status === "running") return "Optimizing";
     if (run.result.native?.keptCandidate) return "Native report";
     return "Baseline retained";

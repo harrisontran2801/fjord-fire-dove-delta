@@ -15,6 +15,8 @@ export default tseslint.config(
       ".nitro/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
+      "agent/target/**",
+      "samples/**/target/**",
     ],
   },
   js.configs.recommended,

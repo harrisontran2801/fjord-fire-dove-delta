@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 
 export function agentStateLabel(agent: AgentStatus | null, run?: Run): string {
   if (run?.status === "verification_failed") return "Verification failed";
+  if (run?.mode === "agent" && run.status === "failed") return "Failed";
   if (run?.mode === "agent" && run.status === "complete") return "Optimization complete";
-  if (run?.mode === "agent" && run.status === "failed") return "Candidate not kept";
   if (run?.mode === "agent" && run.status === "running") return "Optimizing";
   if (run?.mode === "inspect") return run.status === "running" ? "Inspecting" : "Inspection only";
   if (run?.mode === "demo") return "Demo mode";
@@ -23,7 +23,7 @@ export function AgentBadge({
 }) {
   const label = agentStateLabel(agent, run);
   const variant =
-    label === "Verification failed"
+    label === "Verification failed" || label === "Failed"
       ? "danger"
       : label === "Local agent not connected"
         ? "warn"
