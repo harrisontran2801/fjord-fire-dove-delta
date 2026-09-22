@@ -3,6 +3,7 @@ mod doctor;
 mod exec;
 mod inspect;
 mod pipeline;
+mod preflight;
 mod report;
 mod security;
 mod serve;
@@ -12,6 +13,7 @@ use config::load_config;
 use doctor::{doctor_json, doctor_text, run_doctor};
 use inspect::{inspect_path, inspect_to_json};
 use pipeline::{load_run, optimize};
+use preflight::{preflight_json, preflight_text, run_preflight};
 use report::report_text;
 use serde_json::json;
 use std::env;
@@ -22,13 +24,17 @@ fn usage() -> String {
     r#"quench-agent — native local optimization pipeline (Linux x86_64)
 
 Commands:
-  quench-agent doctor
+  quench-agent doctor [--json]
+  quench-agent doctor --config quench.yaml [--json]
+  quench-agent preflight --config quench.yaml [--json]
   quench-agent inspect <file>
   quench-agent optimize --config quench.yaml
   quench-agent report <run-id>
   quench-agent serve [--bind 127.0.0.1:4783] [--socket /tmp/quench-agent.sock]
 
+Linux x86_64 only. Windows and macOS are not supported.
 The agent never uploads binaries. It listens only on loopback / a unix socket.
+Missing tools are Unavailable. Results are never invented.
 "#
     .to_string()
 }
@@ -59,11 +65,43 @@ fn main() -> ExitCode {
     }
     match args[0].as_str() {
         "doctor" => {
-            let report = run_doctor();
-            if json_flag(&args) {
-                println!("{}", doctor_json(&report));
+            if let Some(config) = arg_value(&args, "--config") {
+                let report = run_preflight(&PathBuf::from(config));
+                if json_flag(&args) {
+                    println!("{}", preflight_json(&report));
+                } else {
+                    print!("{}", preflight_text(&report));
+                }
+                if report.ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
             } else {
-                print!("{}", doctor_text(&report));
+                let report = run_doctor();
+                if json_flag(&args) {
+                    println!("{}", doctor_json(&report));
+                } else {
+                    print!("{}", doctor_text(&report));
+                }
+                if report.ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
+            }
+        }
+        "preflight" => {
+            let config = arg_value(&args, "--config").unwrap_or("");
+            if config.is_empty() {
+                eprintln!("usage: quench-agent preflight --config quench.yaml");
+                return ExitCode::from(2);
+            }
+            let report = run_preflight(&PathBuf::from(config));
+            if json_flag(&args) {
+                println!("{}", preflight_json(&report));
+            } else {
+                print!("{}", preflight_text(&report));
             }
             if report.ok {
                 ExitCode::SUCCESS

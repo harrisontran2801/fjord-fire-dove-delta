@@ -23,7 +23,8 @@
     "agent:test": "cargo test --manifest-path agent/Cargo.toml",
     "agent:fmt": "cargo fmt --manifest-path agent/Cargo.toml -- --check",
     "agent:serve": "sh scripts/start-agent.sh",
-    "agent:doctor": "cargo run --release --manifest-path agent/Cargo.toml -- doctor --json"
+    "agent:doctor": "cargo run --release --manifest-path agent/Cargo.toml -- doctor --json",
+    "agent:preflight": "cargo run --release --manifest-path agent/Cargo.toml -- preflight --config samples/match-engine/quench.yaml"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

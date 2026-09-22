@@ -2,6 +2,10 @@
 
 Two processes: the web studio, and an optional native agent.
 
+**Paid Linux x86_64 pilots:** start with [PILOT.md](PILOT.md) and tick [PILOT_CHECKLIST.md](PILOT_CHECKLIST.md). This repo is not a hosted SaaS.
+
+## Web studio
+
 ## Web studio
 
 ```sh
@@ -50,6 +54,7 @@ export QUENCH_WORKSPACE="$PWD"
 export QUENCH_SAMPLE_CONFIG=samples/match-engine/quench.yaml   # optional; this is the default
 npm run agent:build
 npm run agent:doctor
+./agent/target/release/quench-agent preflight --config samples/match-engine/quench.yaml
 ./agent/target/release/quench-agent optimize --config samples/match-engine/quench.yaml
 ```
 

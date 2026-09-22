@@ -4,6 +4,7 @@
 #   npm run agent:build
 #   QUENCH_WORKSPACE=$PWD npm run agent:serve
 #   quench-agent doctor --json
+#   quench-agent preflight --config samples/match-engine/quench.yaml
 #   quench-agent optimize --config samples/match-engine/quench.yaml
 #
 # Environment (serve):
@@ -20,7 +21,7 @@ project: match-engine
 kind: elf
 binary: ./target/release/match-engine
 build: cargo build --release
-test: cargo test
+test: ./scripts/test.sh
 benchmark: ./scripts/bench.sh
 profile: ./scripts/workload.sh
 max_regression_percent: 2

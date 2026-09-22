@@ -181,4 +181,25 @@ min_improvement_percent: 1
         assert_eq!(cfg.binary.as_deref(), Some("./target/release/match-engine"));
         assert_eq!(cfg.max_regression_percent, 2.0);
     }
+
+    #[test]
+    fn elf_optimize_requires_build_test_benchmark() {
+        let text = "project: x\nkind: elf\nbinary: ./app\n";
+        let cfg = parse_config_text(text, Path::new("/tmp/quench.yaml")).unwrap();
+        let err = validate_for_optimize(&cfg).unwrap_err();
+        assert!(err.contains("build"), "{err}");
+    }
+
+    #[test]
+    fn missing_config_file_errors() {
+        let err = load_config(Path::new("/tmp/no-such-quench-config.yaml")).unwrap_err();
+        assert!(err.contains("could not read") || err.contains("No such"));
+    }
+
+    #[test]
+    fn unsupported_kind_is_rejected() {
+        let err =
+            parse_config_text("project: x\nkind: windows\n", Path::new("/tmp/q.yaml")).unwrap_err();
+        assert!(err.contains("unsupported kind"), "{err}");
+    }
 }

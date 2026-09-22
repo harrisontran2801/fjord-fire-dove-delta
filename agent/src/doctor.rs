@@ -196,6 +196,8 @@ pub fn work_dir() -> PathBuf {
 pub fn run_doctor() -> DoctorReport {
     let work = work_dir();
     let (supported, platform) = platform_check();
+    let rustc = tool_check("rustc", "rustc", &["rustc"], &["--version"]);
+    let cargo = tool_check("cargo", "cargo", &["cargo"], &["--version"]);
     let clang = tool_check(
         "clang",
         "LLVM/Clang",
@@ -213,7 +215,9 @@ pub fn run_doctor() -> DoctorReport {
     let strip = tool_check("strip", "strip", &["strip"], &["--version"]);
     let exec = exec_check(&work);
     let disk = disk_check(&work);
-    let checks = vec![platform, clang, bolt, perf, docker, strip, exec, disk];
+    let checks = vec![
+        platform, rustc, cargo, clang, bolt, perf, docker, strip, exec, disk,
+    ];
     let blocking_fail = checks.iter().any(|c| {
         matches!(c.id.as_str(), "platform" | "exec") && c.status == CheckStatus::Unavailable
     });
@@ -250,6 +254,13 @@ pub fn doctor_text(report: &DoctorReport) -> String {
         lines.push(
             "Native optimize is disabled: Linux x86_64 required. Windows and macOS are not supported."
                 .into(),
+        );
+    } else {
+        lines.push(
+            "Optional tools (perf, llvm-bolt, strip, clang, docker) are reported Unavailable when missing; metrics are never invented.".into(),
+        );
+        lines.push(
+            "ELF projects that `build` with cargo also need rustc and cargo on PATH. Run `quench-agent preflight --config quench.yaml` before optimize.".into(),
         );
     }
     lines.join("\n") + "\n"
@@ -293,6 +304,24 @@ mod tests {
                 check_status(&report, "platform").unwrap().status,
                 CheckStatus::Ok
             );
+        }
+    }
+
+    #[test]
+    fn doctor_reports_rust_toolchain() {
+        let report = run_doctor();
+        let rustc = check_status(&report, "rustc").expect("rustc check");
+        let cargo = check_status(&report, "cargo").expect("cargo check");
+        if which("rustc").is_some() {
+            assert_eq!(rustc.status, CheckStatus::Ok);
+        } else {
+            assert_eq!(rustc.status, CheckStatus::Unavailable);
+            assert!(rustc.detail.to_lowercase().contains("not found"));
+        }
+        if which("cargo").is_some() {
+            assert_eq!(cargo.status, CheckStatus::Ok);
+        } else {
+            assert_eq!(cargo.status, CheckStatus::Unavailable);
         }
     }
 }

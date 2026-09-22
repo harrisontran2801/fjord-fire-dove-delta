@@ -2,6 +2,7 @@ use crate::config::load_config;
 use crate::doctor::{doctor_json, run_doctor};
 use crate::inspect::{inspect_path, inspect_to_json};
 use crate::pipeline::{load_run, optimize};
+use crate::preflight::{preflight_json, run_preflight};
 use crate::security::{
     bind_is_loopback, cors_header_lines, default_sample_rel, host_allowed, mutating_origin_ok,
     resolve_config_path, resolve_inspect_path, restrict_unix_socket, sample_config_path,
@@ -169,6 +170,37 @@ fn handle(req: HttpReq, mut stream: impl Write, bind: &str, socket: &str) {
         ("GET", "/v1/doctor") | ("GET", "/doctor") => {
             let report = run_doctor();
             json_res(&mut stream, "200 OK", doctor_json(&report), origin_ref);
+        }
+        ("POST", "/v1/preflight") | ("POST", "/preflight") => {
+            let parsed: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or(json!({}));
+            let config_path = parsed
+                .get("configPath")
+                .or_else(|| parsed.get("config"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if config_path.is_empty() {
+                json_res(
+                    &mut stream,
+                    "400 Bad Request",
+                    json!({"ok": false, "error": "configPath is required"}),
+                    origin_ref,
+                );
+                return;
+            }
+            let resolved = match resolve_config_path(config_path) {
+                Ok(p) => p,
+                Err(e) => {
+                    json_res(
+                        &mut stream,
+                        "403 Forbidden",
+                        json!({"ok": false, "error": e}),
+                        origin_ref,
+                    );
+                    return;
+                }
+            };
+            let report = run_preflight(&resolved);
+            json_res(&mut stream, "200 OK", preflight_json(&report), origin_ref);
         }
         ("POST", "/v1/inspect") | ("POST", "/inspect") => {
             if let Some(p) = header(&req, "X-Quench-Path") {
@@ -447,5 +479,24 @@ mod tests {
         );
         assert!(!res.contains("Access-Control-Allow-Origin: *"), "{res}");
         assert!(res.contains("\"sampleConfig\""), "{res}");
+    }
+
+    #[test]
+    fn http_preflight_requires_config_path() {
+        let raw = "POST /v1/preflight HTTP/1.1\r\nHost: 127.0.0.1:4783\r\nOrigin: http://127.0.0.1:8080\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+        let res = dispatch(raw);
+        assert!(res.starts_with("HTTP/1.1 400"), "{res}");
+        assert!(res.contains("configPath"), "{res}");
+    }
+
+    #[test]
+    fn http_preflight_rejects_out_of_root_config() {
+        let raw = "POST /v1/preflight HTTP/1.1\r\nHost: 127.0.0.1:4783\r\nOrigin: http://127.0.0.1:8080\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"configPath\":\"/etc/passwd\"}";
+        let res = dispatch(raw);
+        assert!(res.starts_with("HTTP/1.1 403"), "{res}");
+        assert!(
+            res.contains("workspace") || res.contains("configPath"),
+            "{res}"
+        );
     }
 }

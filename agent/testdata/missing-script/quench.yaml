@@ -1,0 +1,9 @@
+project: missing-script
+kind: elf
+binary: ./app
+build: gcc -O0 -g -o app main.c
+test: ./test.sh
+benchmark: ./nope.sh
+profile: ./app
+max_regression_percent: 2
+min_improvement_percent: 1

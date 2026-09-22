@@ -440,6 +440,25 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     );
     log_run(&run_dir, &mut run, "analyze", "validate config and input");
 
+    let pf = crate::preflight::evaluate(cfg, &doctor);
+    if !pf.ok {
+        run.status = RunStatus::Failed;
+        let error = pf.blocking_summary();
+        log_run(&run_dir, &mut run, "analyze", &error);
+        finalize_report(
+            &mut run,
+            cfg,
+            json!({
+                "ok": false,
+                "error": error,
+                "keptCandidate": false,
+                "toolVersions": tool_versions(&doctor),
+            }),
+        );
+        write_run(&run_dir, &run)?;
+        return Ok(run);
+    }
+
     let build_cmd = cfg.build.clone().unwrap();
     log_run(
         &run_dir,
@@ -1152,5 +1171,21 @@ mod tests {
             .transforms_applied
             .iter()
             .any(|t| t.tool == "strip" && t.status == "applied"));
+    }
+
+    #[test]
+    fn missing_benchmark_script_fails_without_inventing_metrics() {
+        let (root, _home, _guard) = setup_fixture("missing-script");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize should return a report");
+        assert_eq!(run.status, RunStatus::Failed);
+        assert_eq!(run.report["ok"], false);
+        assert_eq!(run.report["keptCandidate"], false);
+        assert!(run.report.get("medianMs").is_none() || run.report["medianMs"].is_null());
+        let err = run.report["error"].as_str().unwrap_or("");
+        assert!(
+            err.contains("preflight") || err.contains("nope.sh"),
+            "error={err}"
+        );
     }
 }
