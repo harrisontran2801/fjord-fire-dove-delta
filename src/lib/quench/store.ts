@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createAgentRun, createRun, pipelineCompleteMs, revealedStage, runModeFor, stagesFor } from "./engine";
+import {
+  DEFAULT_DELETE_INSPECTION_DATA,
+  persistedRuns,
+  privacyFlagFromStorage,
+  rehydratePersistedRuns,
+  runsAfterPrivacyToggle,
+} from "./privacy";
 import type { Artifact, NativeReport, ParetoPref, Run } from "./types";
 
 function normalizeRun(run: Run): Run {
@@ -16,9 +23,11 @@ function normalizeRun(run: Run): Run {
 interface QuenchState {
   runs: Run[];
   preference: ParetoPref;
+  deleteInspectionData: boolean;
   hydrated: boolean;
   setHydrated: () => void;
   setPreference: (p: ParetoPref) => void;
+  setDeleteInspectionData: (enabled: boolean) => void;
   startRun: (artifact: Artifact, preference?: ParetoPref) => Run;
   startAgentRun: (args: {
     artifact: Artifact;
@@ -33,6 +42,7 @@ interface QuenchState {
   markCompleteIfDue: (id: string) => void;
   setRunPreference: (id: string, p: ParetoPref) => void;
   removeRun: (id: string) => void;
+  clearInspectionData: () => void;
   getRun: (id: string) => Run | undefined;
 }
 
@@ -41,9 +51,15 @@ export const useQuenchStore = create<QuenchState>()(
     (set, get) => ({
       runs: [],
       preference: "balanced",
+      deleteInspectionData: DEFAULT_DELETE_INSPECTION_DATA,
       hydrated: false,
       setHydrated: () => set({ hydrated: true }),
       setPreference: (p) => set({ preference: p }),
+      setDeleteInspectionData: (enabled) =>
+        set((s) => ({
+          deleteInspectionData: enabled,
+          runs: runsAfterPrivacyToggle(s.runs, enabled),
+        })),
       startRun: (artifact, preference) => {
         const pref = preference ?? get().preference;
         const run = createRun(artifact, pref);
@@ -74,22 +90,45 @@ export const useQuenchStore = create<QuenchState>()(
           }),
         })),
       removeRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
+      clearInspectionData: () => set((s) => ({ runs: persistedRuns(s.runs, true) })),
       getRun: (id) => get().runs.find((r) => r.id === id),
     }),
     {
       name: "quench-studio-v3",
-      partialize: (s) => ({ runs: s.runs, preference: s.preference }),
+      partialize: (s) => ({
+        runs: persistedRuns(s.runs, s.deleteInspectionData),
+        preference: s.preference,
+        deleteInspectionData: s.deleteInspectionData,
+      }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState as Partial<QuenchState> | undefined) ?? {};
+        const deleteInspectionData = privacyFlagFromStorage(persisted.deleteInspectionData);
+        const incomingRuns = Array.isArray(persisted.runs) ? persisted.runs : currentState.runs;
+        return {
+          ...currentState,
+          ...persisted,
+          deleteInspectionData,
+          runs: rehydratePersistedRuns(incomingRuns, deleteInspectionData),
+        };
+      },
       onRehydrateStorage: () => (state) => {
         const now = Date.now();
-        if (!state) return;
-        const runs = (state.runs ?? []).map((r) => {
-          const run = normalizeRun(r);
-          if (run.mode === "agent") return run;
-          return run.status === "running" && now - run.startedAt >= pipelineCompleteMs(run.mode)
-            ? { ...run, status: "complete" as const }
-            : run;
-        });
-        useQuenchStore.setState({ runs, hydrated: true });
+        if (!state) {
+          useQuenchStore.setState({ hydrated: true });
+          return;
+        }
+        const deleteInspectionData = privacyFlagFromStorage(state.deleteInspectionData);
+        const runs = rehydratePersistedRuns(
+          (state.runs ?? []).map((r) => {
+            const run = normalizeRun(r);
+            if (run.mode === "agent") return run;
+            return run.status === "running" && now - run.startedAt >= pipelineCompleteMs(run.mode)
+              ? { ...run, status: "complete" as const }
+              : run;
+          }),
+          deleteInspectionData,
+        );
+        useQuenchStore.setState({ runs, deleteInspectionData, hydrated: true });
       },
     },
   ),

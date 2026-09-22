@@ -43,6 +43,9 @@ function StudioPage() {
   const hydrated = useQuenchStore((s) => s.hydrated);
   const setHydrated = useQuenchStore((s) => s.setHydrated);
   const removeRun = useQuenchStore((s) => s.removeRun);
+  const deleteInspectionData = useQuenchStore((s) => s.deleteInspectionData);
+  const setDeleteInspectionData = useQuenchStore((s) => s.setDeleteInspectionData);
+  const clearInspectionData = useQuenchStore((s) => s.clearInspectionData);
 
   useEffect(() => {
     if (!hydrated) setHydrated();
@@ -135,6 +138,7 @@ function StudioPage() {
   }
 
   const connected = Boolean(agent?.connected);
+  const inspectionCount = runs.filter((run) => run.mode === "inspect").length;
 
   return (
     <Shell wide>
@@ -264,6 +268,66 @@ function StudioPage() {
             </p>
           </div>
         ) : null}
+
+        <section
+          className="mt-6 rounded-xl bg-surface p-4 shadow-[var(--shadow-border)]"
+          aria-labelledby="inspection-privacy-heading"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p id="inspection-privacy-heading" className="text-sm font-medium">
+                Inspection privacy
+              </p>
+              <p id="inspection-privacy-help" className="mt-1 max-w-2xl text-xs text-muted">
+                Uploaded bytes are processed in memory and are not saved in browser storage. When
+                enabled, inspection results and their metadata are also removed from local history.
+              </p>
+            </div>
+            <label className="flex min-h-11 shrink-0 cursor-pointer items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={deleteInspectionData}
+                aria-checked={deleteInspectionData}
+                onChange={(e) => setDeleteInspectionData(e.target.checked)}
+                aria-describedby="inspection-privacy-help"
+                className="peer sr-only"
+              />
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "relative inline-flex h-6 w-11 shrink-0 rounded-full shadow-[var(--shadow-border)] transition-colors duration-150 peer-focus-visible:ring-2 peer-focus-visible:ring-ring/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-bg",
+                  deleteInspectionData ? "bg-accent" : "bg-surface-2",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 left-0.5 size-5 rounded-full transition-transform duration-150",
+                    deleteInspectionData ? "translate-x-5 bg-accent-fg" : "bg-fg",
+                  )}
+                />
+              </span>
+              Delete inspection data after checking (recommended)
+            </label>
+          </div>
+          <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-subtle">
+              {deleteInspectionData
+                ? "New inspection runs remain visible until you leave or reload, but are not retained in browser history."
+                : `${inspectionCount} inspection ${inspectionCount === 1 ? "run" : "runs"} currently retained in local history.`}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={inspectionCount === 0}
+              onClick={clearInspectionData}
+            >
+              <Trash2 />
+              Clear inspection data
+            </Button>
+          </div>
+        </section>
 
         <h2 className="mt-10 font-display text-lg font-semibold">Sample workloads</h2>
         <p className="mt-2 text-xs text-muted">

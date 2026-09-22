@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ArrowLeft, Check, Copy, Download } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, Trash2 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,7 @@ function RunPage() {
   const run = useQuenchStore((s) => s.runs.find((r) => r.id === runId));
   const markCompleteIfDue = useQuenchStore((s) => s.markCompleteIfDue);
   const setRunPreference = useQuenchStore((s) => s.setRunPreference);
+  const removeRun = useQuenchStore((s) => s.removeRun);
   const hydrated = useQuenchStore((s) => s.hydrated);
   const setHydrated = useQuenchStore((s) => s.setHydrated);
   const [now, setNow] = useState(() => Date.now());
@@ -166,6 +167,20 @@ function RunPage() {
                 </Button>
               ))}
             </div>
+          ) : isInspect(run) ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                removeRun(run.id);
+                toast.success("Inspection data deleted");
+                void navigate({ to: "/studio" });
+              }}
+            >
+              <Trash2 />
+              Delete inspection data
+            </Button>
           ) : null}
         </div>
 

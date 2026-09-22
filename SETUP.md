@@ -52,6 +52,22 @@ Origin allowlisting and CORS are **not authentication**. TCP mutation endpoints 
 
 Dropping an ELF / Docker save / OCI archive identifies the file (browser fallback or native inspect). That path is **inspection-only**. It does not start a demo optimizer and does not fabricate benchmarks. To optimize, provide a real `quench.yaml` in the workspace and run the agent.
 
+Inspection bytes are processed in memory. The native inspection endpoint writes a temporary upload, inspects it, and deletes that file before responding. Studio does **not** persist uploaded bytes in browser storage.
+
+## Inspection privacy
+
+Studio’s **Delete inspection data after checking (recommended)** control defaults to **ON**.
+
+When ON:
+
+- Inspection metadata and reports are not written to browser history (`localStorage`).
+- Enabling the setting removes any existing inspection runs from the current history immediately.
+- Reloading or rehydrating older local state filters legacy inspection runs out of history.
+
+When OFF, inspection history may be retained locally alongside demo and native agent runs.
+
+**Clear inspection data** still removes inspection runs at any time, and each report keeps its per-run delete action. Demo and native agent runs are not affected by the inspection privacy setting.
+
 ## Honest limitations
 
 - `perf` and `llvm-bolt` are reported **Unavailable** when they are not on PATH.
