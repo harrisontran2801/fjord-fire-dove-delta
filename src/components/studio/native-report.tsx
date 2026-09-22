@@ -93,6 +93,26 @@ export function NativeFacts({ run }: { run: Run }) {
         <Fact label="Build" value={n.buildCommand ?? "—"} mono />
         <Fact label="Test" value={n.testCommand ?? "—"} mono />
         <Fact label="Profile" value={n.profileCommand ?? "—"} mono />
+        <Fact
+          label="Profile mode"
+          value={
+            n.profileMode
+              ? `${n.profileMode}${n.profileReason ? ` — ${n.profileReason}` : ""}`
+              : "—"
+          }
+        />
+        {n.lbrProbeCommand ? (
+          <Fact
+            label="LBR probe"
+            value={`${n.lbrProbeCommand}${n.lbrProbeOk === false ? " (failed)" : n.lbrProbeOk === true ? " (ok)" : ""}`}
+            mono
+          />
+        ) : null}
+        {n.profileWarning ? <Fact label="Profile warning" value={n.profileWarning} /> : null}
+        <Fact
+          label="Benchmarked"
+          value={`original=${n.benchmarkedOriginal ?? "—"} · candidate=${n.benchmarkedCandidate ?? "—"} · instrumented=${n.benchmarkedInstrumented ?? false}`}
+        />
         <Fact label="Benchmark" value={n.benchmarkCommand ?? "—"} mono />
         <Fact
           label="Median / p95"

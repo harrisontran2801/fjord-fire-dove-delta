@@ -1,7 +1,7 @@
 project: match-engine
 kind: elf
 binary: ./target/release/match-engine
-build: cargo build --release
+build: env RUSTFLAGS='-C link-arg=-Wl,--emit-relocs' cargo build --release
 test: ./scripts/test.sh
 benchmark: ./scripts/bench.sh
 profile: ./scripts/workload.sh

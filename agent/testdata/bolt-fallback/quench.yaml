@@ -1,0 +1,9 @@
+project: bolt-fallback
+kind: elf
+binary: ./app
+build: gcc -O0 -g -Wl,--emit-relocs -o app main.c
+test: ./test.sh
+benchmark: ./bench.sh
+profile: ./workload.sh
+max_regression_percent: 2
+min_improvement_percent: 1

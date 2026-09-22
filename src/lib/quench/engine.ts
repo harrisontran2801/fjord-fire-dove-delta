@@ -320,6 +320,20 @@ export function createAgentRun(args: {
     testCommand: args.report.testCommand ? String(args.report.testCommand) : undefined,
     benchmarkCommand: args.report.benchmarkCommand ? String(args.report.benchmarkCommand) : undefined,
     profileCommand: args.report.profileCommand ? String(args.report.profileCommand) : undefined,
+    profileMode: args.report.profileMode ? String(args.report.profileMode) : undefined,
+    profileReason: args.report.profileReason ? String(args.report.profileReason) : undefined,
+    profileWarning: args.report.profileWarning ? String(args.report.profileWarning) : undefined,
+    lbrProbeCommand: args.report.lbrProbeCommand ? String(args.report.lbrProbeCommand) : undefined,
+    lbrProbeOk: typeof args.report.lbrProbeOk === "boolean" ? args.report.lbrProbeOk : undefined,
+    lbrProbeDetail: args.report.lbrProbeDetail ? String(args.report.lbrProbeDetail) : undefined,
+    benchmarkedOriginal:
+      typeof args.report.benchmarkedOriginal === "boolean" ? args.report.benchmarkedOriginal : undefined,
+    benchmarkedCandidate:
+      typeof args.report.benchmarkedCandidate === "boolean" ? args.report.benchmarkedCandidate : undefined,
+    benchmarkedInstrumented:
+      typeof args.report.benchmarkedInstrumented === "boolean"
+        ? args.report.benchmarkedInstrumented
+        : undefined,
     toolVersions: args.report.toolVersions,
     baselineSha256: args.report.baselineSha256 ? String(args.report.baselineSha256) : undefined,
     candidateSha256: args.report.candidateSha256 == null ? null : String(args.report.candidateSha256),

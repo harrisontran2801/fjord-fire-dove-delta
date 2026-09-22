@@ -2,6 +2,12 @@ use crate::config::{validate_for_optimize, ProjectKind, QuenchConfig};
 use crate::doctor::{run_doctor, tool_available, DoctorReport};
 use crate::exec::{resolve_in_root, run_command, tool_version, write_log_line, CommandRecord};
 use crate::inspect::{inspect_path, InspectOutcome};
+use crate::profile::{
+    bolt_optimize_command, elf_has_text_relocs, find_bolt_rt_instr, forced_profile_mode,
+    instrument_command, lbr_record_command, nl_record_command, probe_lbr,
+    rewrite_profile_command_for_instrumented, select_profile_mode, ProfileInfo, ProfileInputs,
+    ProfileMode,
+};
 use crate::util::{copy_file, file_size, new_run_id, now_ms, sha256_file, which, write_json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -46,6 +52,8 @@ pub struct PipelineRun {
     pub transforms_applied: Vec<Transform>,
     pub transforms_failed: Vec<Transform>,
     pub report: Value,
+    #[serde(default)]
+    pub profile: ProfileInfo,
 }
 
 fn log_run(run_dir: &Path, run: &mut PipelineRun, stage: &str, line: &str) {
@@ -330,6 +338,12 @@ fn finalize_report(run: &mut PipelineRun, cfg: &QuenchConfig, extra: Value) {
             "disclaimer".into(),
             json!("Local optimization report. Not an ISO certificate, third-party certificate, or certified result."),
         );
+        let p = run.profile.to_json();
+        if let Some(pmap) = p.as_object() {
+            for (k, v) in pmap {
+                obj.entry(k.clone()).or_insert(v.clone());
+            }
+        }
     }
     run.report = report;
 }
@@ -360,6 +374,7 @@ fn optimize_docker(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         transforms_applied: vec![],
         transforms_failed: vec![],
         report: json!({}),
+        profile: ProfileInfo::default(),
     };
     log_run(
         &run_dir,
@@ -430,6 +445,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         transforms_applied: vec![],
         transforms_failed: vec![],
         report: json!({}),
+        profile: ProfileInfo::default(),
     };
 
     log_run(
@@ -593,130 +609,66 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     };
 
     let mut profile_path: Option<PathBuf> = None;
-    if let Some(profile_cmd) = &cfg.profile {
-        log_run(&run_dir, &mut run, "profile", profile_cmd);
-        if can_use(&doctor, "perf") {
-            let perf_data = run_dir.join("artifacts/perf.data");
-            let wrapped = format!(
-                "perf record --no-buildid --no-buildid-cache -o {} -- {}",
-                perf_data.display(),
-                profile_cmd
-            );
-            let rec = run_command(
-                &wrapped,
-                &cfg.project_root,
-                timeout(),
-                &[
-                    ("QUENCH_BINARY", &baseline_copy.to_string_lossy()),
-                    ("QUENCH_STAGE", "profile"),
-                ],
-                None,
-            );
-            let ok = rec.exit_code == 0 && perf_data.is_file();
-            record(&mut run, rec);
-            if ok {
-                profile_path = Some(perf_data);
-                log_run(&run_dir, &mut run, "profile", "perf profile captured");
-            } else {
-                log_run(
-                    &run_dir,
-                    &mut run,
-                    "profile",
-                    "perf did not produce a usable profile",
-                );
-            }
-        } else {
-            let rec = run_command(
-                profile_cmd,
-                &cfg.project_root,
-                timeout(),
-                &[
-                    ("QUENCH_BINARY", &baseline_copy.to_string_lossy()),
-                    ("QUENCH_STAGE", "profile"),
-                ],
-                Some(&baseline_copy),
-            );
-            record(&mut run, rec);
-            run.transforms_failed.push(Transform {
-                tool: "perf".into(),
-                status: "Unavailable".into(),
-                detail: "perf is not installed; no LBR profile was collected".into(),
-            });
-            log_run(&run_dir, &mut run, "profile", "perf: Unavailable");
-        }
-    }
+    collect_profile(
+        cfg,
+        &mut run,
+        &run_dir,
+        &doctor,
+        &baseline_copy,
+        &mut profile_path,
+    );
+    run.profile.benchmarked_original = true;
+    run.profile.benchmarked_instrumented = false;
 
     let mut current = baseline_copy.clone();
-    if can_use(&doctor, "llvm-bolt") {
-        if let Some(profile) = &profile_path {
-            let bolted = run_dir.join("artifacts/candidate.bolt");
-            let cmd = format!(
-                "llvm-bolt {} -o {} -data={} -reorder-blocks=ext-tsp -reorder-functions=hfsort -split-functions -split-all-cold -dyno-stats",
-                current.display(),
-                bolted.display(),
-                profile.display()
-            );
-            log_run(&run_dir, &mut run, "optimize", &cmd);
-            let rec = run_command(&cmd, &cfg.project_root, timeout(), &[], Some(&bolted));
-            let ok = rec.exit_code == 0 && bolted.is_file();
-            record(&mut run, rec);
-            if ok {
-                run.transforms_applied.push(Transform {
-                    tool: "llvm-bolt".into(),
-                    status: "applied".into(),
-                    detail: "created BOLT candidate from profile".into(),
-                });
-                current = bolted;
-            } else {
-                run.transforms_failed.push(Transform {
-                    tool: "llvm-bolt".into(),
-                    status: "failed".into(),
-                    detail: "llvm-bolt ran but did not produce a candidate".into(),
-                });
-            }
-        } else {
+    apply_bolt_if_profiled(
+        &mut run,
+        &run_dir,
+        &doctor,
+        &baseline_copy,
+        &mut current,
+        profile_path.as_deref(),
+    );
+
+    let bolt_applied = run
+        .transforms_applied
+        .iter()
+        .any(|t| t.tool == "llvm-bolt" && t.status == "applied");
+    if can_use(&doctor, "strip") {
+        if bolt_applied {
             run.transforms_failed.push(Transform {
-                tool: "llvm-bolt".into(),
+                tool: "strip".into(),
                 status: "skipped".into(),
-                detail: "no valid profile; llvm-bolt was not applied".into(),
+                detail: "GNU strip is not applied after llvm-bolt; it can break BOLT section layout. The BOLT candidate is tested unstripped.".into(),
             });
             log_run(
                 &run_dir,
                 &mut run,
                 "optimize",
-                "llvm-bolt skipped: no valid profile",
+                "strip skipped after llvm-bolt (section layout)",
             );
-        }
-    } else {
-        run.transforms_failed.push(Transform {
-            tool: "llvm-bolt".into(),
-            status: "Unavailable".into(),
-            detail: "llvm-bolt not found on PATH; no layout rewrite was performed".into(),
-        });
-        log_run(&run_dir, &mut run, "optimize", "llvm-bolt: Unavailable");
-    }
-
-    if can_use(&doctor, "strip") {
-        let stripped = run_dir.join("artifacts/candidate.stripped");
-        copy_file(&current, &stripped)?;
-        let cmd = format!("strip --strip-unneeded {}", stripped.display());
-        log_run(&run_dir, &mut run, "optimize", &cmd);
-        let rec = run_command(&cmd, &run_dir, timeout(), &[], Some(&stripped));
-        let ok = rec.exit_code == 0 && stripped.is_file();
-        record(&mut run, rec);
-        if ok {
-            run.transforms_applied.push(Transform {
-                tool: "strip".into(),
-                status: "applied".into(),
-                detail: "strip --strip-unneeded on a copy".into(),
-            });
-            current = stripped;
         } else {
-            run.transforms_failed.push(Transform {
-                tool: "strip".into(),
-                status: "failed".into(),
-                detail: "strip failed; copy discarded".into(),
-            });
+            let stripped = run_dir.join("artifacts/candidate.stripped");
+            copy_file(&current, &stripped)?;
+            let cmd = format!("strip --strip-unneeded {}", stripped.display());
+            log_run(&run_dir, &mut run, "optimize", &cmd);
+            let rec = run_command(&cmd, &run_dir, timeout(), &[], Some(&stripped));
+            let ok = rec.exit_code == 0 && stripped.is_file();
+            record(&mut run, rec);
+            if ok {
+                run.transforms_applied.push(Transform {
+                    tool: "strip".into(),
+                    status: "applied".into(),
+                    detail: "strip --strip-unneeded on a copy".into(),
+                });
+                current = stripped;
+            } else {
+                run.transforms_failed.push(Transform {
+                    tool: "strip".into(),
+                    status: "failed".into(),
+                    detail: "strip failed; copy discarded".into(),
+                });
+            }
         }
     } else {
         run.transforms_failed.push(Transform {
@@ -833,6 +785,8 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
             return Ok(run);
         }
     };
+    run.profile.benchmarked_candidate = true;
+    run.profile.benchmarked_instrumented = false;
 
     if let Some(reason) = should_discard_candidate(
         &baseline_bench,
@@ -919,6 +873,303 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     Ok(run)
 }
 
+fn collect_profile(
+    cfg: &QuenchConfig,
+    run: &mut PipelineRun,
+    run_dir: &Path,
+    doctor: &DoctorReport,
+    baseline: &Path,
+    profile_path: &mut Option<PathBuf>,
+) {
+    let has_relocs = elf_has_text_relocs(baseline).unwrap_or(false);
+    let bolt_rt = find_bolt_rt_instr();
+    let probe = probe_lbr();
+    run.profile.lbr_probe_ok = Some(probe.ok);
+    run.profile.lbr_probe_command = probe.command.clone();
+    run.profile.lbr_probe_detail = probe.detail.clone();
+    run.profile.bolt_rt = bolt_rt.as_ref().map(|p| p.display().to_string());
+    run.profile.has_text_relocs = has_relocs;
+    log_run(
+        run_dir,
+        run,
+        "profile",
+        &format!("LBR probe: {} ({})", probe.command, probe.detail),
+    );
+
+    let decision = select_profile_mode(ProfileInputs {
+        lbr_probe_ok: probe.ok,
+        perf_ok: can_use(doctor, "perf"),
+        bolt_ok: can_use(doctor, "llvm-bolt"),
+        bolt_rt: bolt_rt.clone(),
+        has_text_relocs: has_relocs,
+        has_profile_cmd: cfg.profile.is_some(),
+        force: forced_profile_mode(),
+    });
+    run.profile.mode = decision.mode;
+    run.profile.reason = decision.reason.clone();
+    run.profile.warning = decision.warning.clone();
+    log_run(
+        run_dir,
+        run,
+        "profile",
+        &format!("profileMode={} {}", decision.mode.as_str(), decision.reason),
+    );
+    if let Some(w) = &decision.warning {
+        log_run(run_dir, run, "profile", w);
+    }
+
+    if !can_use(doctor, "llvm-bolt") {
+        run.transforms_failed.push(Transform {
+            tool: "llvm-bolt".into(),
+            status: "Unavailable".into(),
+            detail: "llvm-bolt not found on PATH; no layout rewrite was performed".into(),
+        });
+        log_run(run_dir, run, "optimize", "llvm-bolt: Unavailable");
+        return;
+    }
+
+    let Some(profile_cmd) = cfg.profile.clone() else {
+        run.transforms_failed.push(Transform {
+            tool: "llvm-bolt".into(),
+            status: "skipped".into(),
+            detail: "no profile command; llvm-bolt was not applied".into(),
+        });
+        return;
+    };
+
+    match decision.mode {
+        ProfileMode::Lbr => {
+            let perf_data = run_dir.join("artifacts/perf.data");
+            let wrapped = lbr_record_command(&perf_data, &profile_cmd);
+            log_run(run_dir, run, "profile", &wrapped);
+            let rec = run_command(
+                &wrapped,
+                &cfg.project_root,
+                timeout(),
+                &[
+                    ("QUENCH_BINARY", &baseline.to_string_lossy()),
+                    ("QUENCH_STAGE", "profile"),
+                ],
+                None,
+            );
+            let ok =
+                rec.exit_code == 0 && perf_data.is_file() && file_size(&perf_data).unwrap_or(0) > 0;
+            record(run, rec);
+            if ok {
+                *profile_path = Some(perf_data);
+                log_run(run_dir, run, "profile", "LBR perf profile captured");
+            } else {
+                log_run(
+                    run_dir,
+                    run,
+                    "profile",
+                    "LBR perf record failed; no profile",
+                );
+                run.profile.reason = "LBR collection failed; no profile was produced".into();
+            }
+        }
+        ProfileMode::Instrument => {
+            if bolt_rt.is_none() {
+                run.transforms_failed.push(Transform {
+                    tool: "llvm-bolt".into(),
+                    status: "Unavailable".into(),
+                    detail: "libbolt_rt_instr.a not found; instrumentation fallback skipped".into(),
+                });
+                run.profile.mode = ProfileMode::Unavailable;
+                run.profile.reason = "libbolt_rt_instr.a missing".into();
+                return;
+            }
+            if !has_relocs {
+                run.transforms_failed.push(Transform {
+                    tool: "llvm-bolt".into(),
+                    status: "skipped".into(),
+                    detail: "binary has no .rela.text; rebuild with -Wl,--emit-relocs".into(),
+                });
+                log_run(
+                    run_dir,
+                    run,
+                    "optimize",
+                    "llvm-bolt skipped: missing text relocations",
+                );
+                return;
+            }
+            let inst = run_dir.join("artifacts/instrumented");
+            let fdata = run_dir.join("artifacts/prof.fdata");
+            let _ = std::fs::remove_file(&fdata);
+            let cmd = instrument_command(baseline, &inst, &fdata);
+            log_run(run_dir, run, "profile", &cmd);
+            let rec = run_command(&cmd, &cfg.project_root, timeout(), &[], Some(&inst));
+            let inst_ok = rec.exit_code == 0 && inst.is_file();
+            record(run, rec);
+            if !inst_ok {
+                run.transforms_failed.push(Transform {
+                    tool: "llvm-bolt".into(),
+                    status: "failed".into(),
+                    detail: "BOLT instrumentation did not produce an instrumented copy".into(),
+                });
+                let _ = std::fs::remove_file(&inst);
+                return;
+            }
+            run.profile.instrumented_path = Some(inst.display().to_string());
+            let project_bin =
+                resolve_in_root(&cfg.project_root, cfg.binary.as_deref().unwrap_or(""));
+            let workload = rewrite_profile_command_for_instrumented(
+                &profile_cmd,
+                baseline,
+                &project_bin,
+                &inst,
+                &cfg.project_root,
+            );
+            log_run(
+                run_dir,
+                run,
+                "profile",
+                &format!(
+                    "running workload against instrumented copy (not a benchmark): {workload}"
+                ),
+            );
+            let rec = run_command(
+                &workload,
+                &cfg.project_root,
+                timeout(),
+                &[
+                    ("QUENCH_BINARY", &inst.to_string_lossy()),
+                    ("QUENCH_STAGE", "profile"),
+                ],
+                Some(&inst),
+            );
+            record(run, rec);
+            let fdata_ok = fdata.is_file() && file_size(&fdata).unwrap_or(0) > 0;
+            let _ = std::fs::remove_file(&inst);
+            run.profile.instrumented_path = None;
+            if fdata_ok {
+                *profile_path = Some(fdata.clone());
+                run.profile.fdata_path = Some(fdata.display().to_string());
+                log_run(run_dir, run, "profile", "instrumentation fdata captured");
+            } else {
+                run.transforms_failed.push(Transform {
+                    tool: "llvm-bolt".into(),
+                    status: "failed".into(),
+                    detail: "instrumented workload did not write a usable .fdata profile".into(),
+                });
+            }
+        }
+        ProfileMode::Nl => {
+            let perf_data = run_dir.join("artifacts/perf.data");
+            let wrapped = nl_record_command(&perf_data, &profile_cmd);
+            log_run(run_dir, run, "profile", &wrapped);
+            let rec = run_command(
+                &wrapped,
+                &cfg.project_root,
+                timeout(),
+                &[
+                    ("QUENCH_BINARY", &baseline.to_string_lossy()),
+                    ("QUENCH_STAGE", "profile"),
+                ],
+                None,
+            );
+            let ok = rec.exit_code == 0 && perf_data.is_file();
+            record(run, rec);
+            if ok {
+                *profile_path = Some(perf_data);
+                log_run(run_dir, run, "profile", "no-LBR perf profile captured");
+            } else {
+                log_run(run_dir, run, "profile", "no-LBR perf record failed");
+            }
+        }
+        ProfileMode::Unavailable => {
+            if !can_use(doctor, "perf") {
+                run.transforms_failed.push(Transform {
+                    tool: "perf".into(),
+                    status: "Unavailable".into(),
+                    detail: "perf is not installed; no LBR profile was collected".into(),
+                });
+            }
+            run.transforms_failed.push(Transform {
+                tool: "llvm-bolt".into(),
+                status: "skipped".into(),
+                detail: decision.reason.clone(),
+            });
+        }
+    }
+}
+
+fn apply_bolt_if_profiled(
+    run: &mut PipelineRun,
+    run_dir: &Path,
+    doctor: &DoctorReport,
+    baseline: &Path,
+    current: &mut PathBuf,
+    profile: Option<&Path>,
+) {
+    if !can_use(doctor, "llvm-bolt") {
+        return;
+    }
+    let Some(profile) = profile else {
+        if !run.transforms_failed.iter().any(|t| t.tool == "llvm-bolt") {
+            run.transforms_failed.push(Transform {
+                tool: "llvm-bolt".into(),
+                status: "skipped".into(),
+                detail: "no valid profile; llvm-bolt was not applied".into(),
+            });
+            log_run(
+                run_dir,
+                run,
+                "optimize",
+                "llvm-bolt skipped: no valid profile",
+            );
+        }
+        return;
+    };
+    if !run.profile.has_text_relocs && run.profile.mode != ProfileMode::Lbr {
+        if !run
+            .transforms_failed
+            .iter()
+            .any(|t| t.tool == "llvm-bolt" && t.status == "skipped")
+        {
+            run.transforms_failed.push(Transform {
+                tool: "llvm-bolt".into(),
+                status: "skipped".into(),
+                detail: "binary has no .rela.text; rebuild with -Wl,--emit-relocs".into(),
+            });
+        }
+        return;
+    }
+    let bolted = run_dir.join("artifacts/candidate.bolt");
+    let cmd = bolt_optimize_command(
+        baseline,
+        &bolted,
+        profile,
+        run.profile.mode == ProfileMode::Nl,
+    );
+    log_run(run_dir, run, "optimize", &cmd);
+    let rec = run_command(&cmd, run_dir, timeout(), &[], Some(&bolted));
+    let ok = rec.exit_code == 0 && bolted.is_file();
+    record(run, rec);
+    if ok {
+        let detail = match run.profile.mode {
+            ProfileMode::Instrument => {
+                "created BOLT candidate from instrumentation fdata (original binary, not the instrumented copy)"
+            }
+            ProfileMode::Lbr => "created BOLT candidate from LBR profile",
+            ProfileMode::Nl => "created BOLT candidate from no-LBR samples",
+            ProfileMode::Unavailable => "created BOLT candidate",
+        };
+        run.transforms_applied.push(Transform {
+            tool: "llvm-bolt".into(),
+            status: "applied".into(),
+            detail: detail.into(),
+        });
+        *current = bolted;
+    } else {
+        run.transforms_failed.push(Transform {
+            tool: "llvm-bolt".into(),
+            status: "failed".into(),
+            detail: "llvm-bolt ran but did not produce a candidate".into(),
+        });
+    }
+}
+
 pub fn write_run(run_dir: &Path, run: &PipelineRun) -> Result<(), String> {
     write_json(
         &run_dir.join("run.json"),
@@ -977,7 +1228,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            for script in ["test.sh", "bench.sh"] {
+            for script in ["test.sh", "bench.sh", "workload.sh"] {
                 let p = tmp.join(script);
                 if p.exists() {
                     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -989,6 +1240,9 @@ mod tests {
         std::env::set_var("QUENCH_HOME", &home);
         std::env::set_var("QUENCH_CMD_TIMEOUT_SECS", "60");
         std::env::remove_var("QUENCH_FORCE_UNAVAILABLE");
+        std::env::remove_var("QUENCH_FORCE_PROFILE_MODE");
+        std::env::remove_var("QUENCH_FORCE_LBR");
+        std::env::remove_var("QUENCH_BOLT_RT_INSTR");
         (tmp, home, guard)
     }
 
@@ -1137,6 +1391,11 @@ mod tests {
             .and_then(|v| v.as_f64())
             .is_some());
         assert!(r.get("keptCandidate").and_then(|v| v.as_bool()).is_some());
+        assert!(r.get("profileMode").and_then(|v| v.as_str()).is_some());
+        assert_eq!(
+            r.get("benchmarkedInstrumented").and_then(|v| v.as_bool()),
+            Some(false)
+        );
         assert!(r.get("toolVersions").and_then(|v| v.as_object()).is_some());
         assert!(r.get("project").and_then(|v| v.as_str()).is_some());
         assert!(r
@@ -1171,6 +1430,152 @@ mod tests {
             .transforms_applied
             .iter()
             .any(|t| t.tool == "strip" && t.status == "applied"));
+    }
+
+    #[test]
+    fn profile_mode_unavailable_is_recorded() {
+        let (root, _home, _guard) = setup_fixture("success");
+        std::env::set_var("QUENCH_FORCE_PROFILE_MODE", "unavailable");
+        std::env::set_var("QUENCH_FORCE_UNAVAILABLE", "llvm-bolt,perf");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_eq!(run.report["profileMode"], "unavailable");
+        assert_eq!(run.report["benchmarkedInstrumented"], false);
+        assert_eq!(run.report["benchmarkedOriginal"], true);
+    }
+
+    #[test]
+    fn lbr_forced_path_records_lbr_commands() {
+        let (root, _home, _guard) = setup_fixture("success");
+        std::env::set_var("QUENCH_FORCE_PROFILE_MODE", "lbr");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_eq!(run.report["profileMode"], "lbr");
+        assert_eq!(
+            run.report["lbrProbeCommand"],
+            "perf record -e cycles:u -j any,u -- sleep 0.3"
+        );
+        if which("perf").is_some() {
+            assert!(
+                run.commands
+                    .iter()
+                    .any(|c| c.command.contains("cycles:u -j any,u")),
+                "LBR path must record the branch-stack perf command"
+            );
+        }
+        assert_eq!(run.report["benchmarkedInstrumented"], false);
+    }
+
+    #[test]
+    fn missing_libbolt_rt_does_not_instrument() {
+        let (root, _home, _guard) = setup_fixture("success");
+        std::env::set_var("QUENCH_FORCE_PROFILE_MODE", "instrument");
+        std::env::set_var("QUENCH_BOLT_RT_INSTR", "/tmp/quench-missing-libbolt-rt.a");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_ne!(run.report["profileMode"], "instrument");
+        assert!(
+            run.transforms_failed
+                .iter()
+                .any(|t| t.tool == "llvm-bolt"
+                    && (t.status == "Unavailable" || t.status == "skipped"))
+        );
+        assert!(!run
+            .commands
+            .iter()
+            .any(|c| c.command.contains("-instrument ")));
+    }
+
+    #[test]
+    fn missing_relocs_skip_instrumentation() {
+        let (root, _home, _guard) = setup_fixture("success");
+        if which("llvm-bolt").is_none() {
+            return;
+        }
+        std::env::set_var("QUENCH_FORCE_PROFILE_MODE", "instrument");
+        std::env::set_var("QUENCH_FORCE_LBR", "0");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_eq!(run.report["profileMode"], "instrument");
+        assert_eq!(run.report["hasTextRelocs"], false);
+        assert!(run.transforms_failed.iter().any(|t| t.tool == "llvm-bolt"
+            && t.status == "skipped"
+            && t.detail.contains("rela.text")));
+        assert!(!run
+            .commands
+            .iter()
+            .any(|c| c.command.contains("-instrument ")));
+        assert_eq!(run.report["benchmarkedInstrumented"], false);
+    }
+
+    #[test]
+    fn instrument_fallback_rejects_without_inventing_keep() {
+        if which("llvm-bolt").is_none() || which("gcc").is_none() {
+            return;
+        }
+        let (root, _home, _guard) = setup_fixture("bolt-fallback");
+        std::env::set_var("QUENCH_FORCE_LBR", "0");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_eq!(run.report["profileMode"], "instrument");
+        assert_eq!(run.report["keptCandidate"], false);
+        assert_eq!(run.report["benchmarkedInstrumented"], false);
+        assert_eq!(run.report["benchmarkedOriginal"], true);
+        let bench = cfg.benchmark.clone().unwrap();
+        for rec in &run.commands {
+            let inst = rec
+                .artifact_path
+                .as_deref()
+                .unwrap_or("")
+                .contains("instrumented");
+            if rec.command.contains(&bench) || rec.command.contains("bench.sh") {
+                assert!(
+                    !inst,
+                    "benchmark ran against instrumented binary: {}",
+                    rec.command
+                );
+            }
+            if inst {
+                assert!(
+                    rec.command.contains("-instrument")
+                        || rec.command.contains("workload")
+                        || rec.command.contains("./app")
+                        || rec.command.contains("instrumented"),
+                    "instrumented artifact used unexpectedly: {}",
+                    rec.command
+                );
+            }
+        }
+        let reason = run.report["reason"].as_str().unwrap_or("");
+        assert!(
+            reason.contains("min_improvement")
+                || reason.contains("No candidate")
+                || reason.contains("regression")
+                || reason.contains("failed"),
+            "reason={reason}"
+        );
+        assert_ne!(run.status, RunStatus::Complete);
+    }
+
+    #[test]
+    fn invalid_elf_is_not_optimized() {
+        let (root, _home, _guard) = setup_fixture("success");
+        std::fs::write(root.join("app"), b"not-an-elf").unwrap();
+        let mut cfg = load_config(&root.join("quench.yaml")).unwrap();
+        cfg.build = Some("true".into());
+        let run = optimize(&cfg).expect("optimize returns a report");
+        assert_eq!(run.report["keptCandidate"], false);
+        assert_eq!(run.status, RunStatus::Failed);
+        let err = run.report["error"].as_str().unwrap_or("");
+        assert!(
+            err.contains("Unsupported format") || err.to_lowercase().contains("elf"),
+            "error={err}"
+        );
     }
 
     #[test]

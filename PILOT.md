@@ -16,10 +16,12 @@ Required on the pilot host:
 
 Optional. Missing tools are recorded as **Unavailable**. Quench does **not** invent profile, BOLT, or benchmark numbers for them:
 
-- `perf` — LBR profile
-- `llvm-bolt` — layout rewrite
+- `perf` — LBR profile (`perf record -e cycles:u -j any,u`). Preferred when the host exposes branch-stack sampling.
+- `llvm-bolt` plus `libbolt_rt_instr.a` — layout rewrite. If LBR is missing, Quench instruments a **copy** of the binary, runs the profile workload against that copy, then BOLTs the **original**.
 - `clang` — unused by the bundled sample
 - Docker / containerd — image rewrite is **not implemented**
+
+LBR is preferred. BOLT instrumentation is the supported no-LBR fallback. The instrumented copy is slower and is **never** used for final benchmark numbers. Instrumentation is **not** production-traffic sampling; do not point it at live customer traffic without explicit approval. GNU `strip` is skipped after `llvm-bolt` because it can break BOLT section layout. A fallback profile can still **reject** the candidate. No result is a commercial proof unless a real authorized workload produces `keptCandidate=true`.
 
 ## Install and start
 
@@ -51,15 +53,17 @@ Copy `quench.yaml.example` next to the crate or binary you want optimized. ELF o
 project: your-binary
 kind: elf
 binary: ./target/release/your-binary
-build: cargo build --release
+build: env RUSTFLAGS='-C link-arg=-Wl,--emit-relocs' cargo build --release
 test: ./scripts/test.sh          # must run your tests; do not skip
 benchmark: ./scripts/bench.sh    # must print elapsed_ms=… or QUENCH_BENCH JSON
-profile: ./scripts/workload.sh   # optional workload for perf
+profile: ./scripts/workload.sh   # workload for LBR or BOLT instrumentation
 max_regression_percent: 2
 min_improvement_percent: 1
 ```
 
-`build`, `test`, and `benchmark` are required. Native optimize will not invent a build, will not claim tests passed without running them, and will not fabricate a benchmark. `profile` is optional; without a usable profile, `llvm-bolt` is skipped.
+`build`, `test`, and `benchmark` are required. Native optimize will not invent a build, will not claim tests passed without running them, and will not fabricate a benchmark. `profile` is optional; without a usable LBR or instrumentation profile, `llvm-bolt` is skipped.
+
+The native report records `profileMode` as `lbr`, `instrument`, `nl`, or `unavailable`, the exact LBR probe (`perf record -e cycles:u -j any,u -- sleep 0.3`), SHA-256 identities, and whether benchmarks used the uninstrumented original and candidate. `nl` is only used when forced; ordinary hosts without LBR and without `libbolt_rt_instr.a` report **Unavailable**.
 
 The HTTP API only accepts a `configPath` **inside** `QUENCH_WORKSPACE`. Absolute paths outside the workspace and `..` escapes are rejected.
 
@@ -94,6 +98,7 @@ A native report always includes:
 - measured median (and p95) from the benchmark command
 - `min_improvement_percent` and `max_regression_percent`
 - **kept** or **rejected**
+- `profileMode` (`lbr` | `instrument` | `nl` | `unavailable`) and the LBR/instrumentation reason
 
 A candidate is **kept** only when:
 

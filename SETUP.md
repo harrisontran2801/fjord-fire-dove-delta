@@ -38,10 +38,12 @@ Required for `samples/match-engine/quench.yaml`:
 
 Optional. Missing tools are recorded as **Unavailable**; the agent does not invent native metrics for them:
 
-- `perf` (LBR profile)
-- `llvm-bolt` (layout rewrite)
+- `perf` (LBR profile: `perf record -e cycles:u -j any,u`). Preferred when the VM/host exposes branch-stack sampling.
+- `llvm-bolt` and `libbolt_rt_instr.a` (layout rewrite). If the LBR probe fails, Quench instruments a **copy**, runs the real profile workload against that copy, then BOLTs the original uninstrumented binary.
 - `clang` (not used by the match-engine sample)
 - `docker` / `containerd` (Docker/OCI rewrite is not implemented)
+
+The instrumented copy is slower and is **never** the source of final median/p95 numbers. Instrumentation is not production-traffic sampling. GNU `strip` is skipped after `llvm-bolt` because it can break BOLT section layout. A fallback profile can still reject the candidate when gates fail. Do not treat a synthetic sample keep as commercial proof.
 
 ### Native run (match-engine)
 
@@ -56,7 +58,7 @@ npm run agent:doctor
 ./agent/target/release/quench-agent optimize --config samples/match-engine/quench.yaml
 ```
 
-That command builds the sample with `cargo build --release`, runs `./scripts/test.sh` (`cargo test` plus the binary `--self-test`), profiles with `./scripts/workload.sh`, and benches with `./scripts/bench.sh`. `perf` / `llvm-bolt` are skipped with **Unavailable** when they are not on PATH. `strip` is applied when present. The report includes baseline and candidate identity, the real commands, tool availability, measured median improvement, `min_improvement_percent`, `max_regression_percent`, and whether the candidate was kept or rejected. Without `llvm-bolt`, a strip-only candidate is often **rejected** when median improvement is below `min_improvement_percent` (default 1%). That is the gate working — size-only change is not invented as a runtime win.
+That command builds the sample with `cargo build --release` and `-Wl,--emit-relocs`, runs `./scripts/test.sh` (`cargo test` plus the binary `--self-test`), profiles with `./scripts/workload.sh` (LBR if the probe passes, otherwise BOLT instrumentation on a copy), and benches with `./scripts/bench.sh`. `perf` / `llvm-bolt` / `libbolt_rt_instr.a` are skipped with **Unavailable** or **No profile** when they are not usable. `strip` is applied when present. The report includes `profileMode`, baseline and candidate identity, the real commands, tool availability, measured median improvement, `min_improvement_percent`, `max_regression_percent`, and whether the candidate was kept or rejected. Without a usable profile, a strip-only candidate is often **rejected** when median improvement is below `min_improvement_percent` (default 1%). That is the gate working — size-only change is not invented as a runtime win.
 
 Serve the agent so Studio can run the same sample:
 

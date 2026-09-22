@@ -4,6 +4,7 @@ mod exec;
 mod inspect;
 mod pipeline;
 mod preflight;
+mod profile;
 mod report;
 mod security;
 mod serve;

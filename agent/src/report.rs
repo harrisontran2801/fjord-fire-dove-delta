@@ -84,6 +84,48 @@ pub fn report_text(run: &PipelineRun) -> String {
             .unwrap_or_else(|| "-".into())
     ));
     lines.push(format!(
+        "profile mode     {}",
+        r.get("profileMode").and_then(|v| v.as_str()).unwrap_or("-")
+    ));
+    if let Some(reason) = r.get("profileReason").and_then(|v| v.as_str()) {
+        if !reason.is_empty() {
+            lines.push(format!("profile reason   {reason}"));
+        }
+    }
+    lines.push(format!(
+        "LBR probe        {} ({})",
+        r.get("lbrProbeCommand")
+            .and_then(|v| v.as_str())
+            .unwrap_or("perf record -e cycles:u -j any,u -- sleep 0.3"),
+        match r.get("lbrProbeOk").and_then(|v| v.as_bool()) {
+            Some(true) => "ok",
+            Some(false) => "failed",
+            None => "not run",
+        }
+    ));
+    if let Some(detail) = r.get("lbrProbeDetail").and_then(|v| v.as_str()) {
+        if !detail.is_empty() {
+            lines.push(format!("LBR probe detail {detail}"));
+        }
+    }
+    lines.push(format!(
+        "bench artifacts  original={} candidate={} instrumented={}",
+        r.get("benchmarkedOriginal")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        r.get("benchmarkedCandidate")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        r.get("benchmarkedInstrumented")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    ));
+    if let Some(w) = r.get("profileWarning").and_then(|v| v.as_str()) {
+        if !w.is_empty() {
+            lines.push(format!("profile warning  {w}"));
+        }
+    }
+    lines.push(format!(
         "candidate        {}",
         if kept {
             "kept"

@@ -67,6 +67,10 @@ test("createAgentRun maps a kept native candidate as complete, not modeled demo"
     buildCommand: "cargo build --release",
     testCommand: "./scripts/test.sh",
     profileCommand: "./scripts/workload.sh",
+    profileMode: "instrument",
+    profileReason: "LBR unavailable; using BOLT instrumentation on a copy",
+    benchmarkedInstrumented: false,
+    benchmarkedOriginal: true,
     benchmarkCommand: "./scripts/bench.sh",
     baselineSha256: "aa".repeat(32),
     candidateSha256: "bb".repeat(32),
@@ -97,6 +101,8 @@ test("createAgentRun maps a kept native candidate as complete, not modeled demo"
   assert.equal(run.result.native?.keptCandidate, true);
   assert.equal(run.result.native?.buildCommand, "cargo build --release");
   assert.equal(run.result.native?.profileCommand, "./scripts/workload.sh");
+  assert.equal(run.result.native?.profileMode, "instrument");
+  assert.equal(run.result.native?.benchmarkedInstrumented, false);
   assert.equal(run.result.native?.benchmarkCommand, "./scripts/bench.sh");
   assert.equal(run.result.native?.minImprovementPercent, 1);
   assert.equal(run.result.native?.maxRegressionPercent, 2);

@@ -14,13 +14,17 @@
 #
 # HTTP /v1/optimize rejects unknown Origins and any configPath outside QUENCH_WORKSPACE.
 # Uploaded files in the Studio are inspection-only unless you point the agent at a real quench.yaml.
-# Missing perf / llvm-bolt are reported as Unavailable. Docker/OCI is inspect/recommendation only.
+# Missing perf LBR / llvm-bolt / libbolt_rt_instr.a are reported as Unavailable.
+# BOLT needs relocations: cargo build --release with
+#   RUSTFLAGS='-C link-arg=-Wl,--emit-relocs'
+# Instrumentation (no-LBR fallback) profiles a copy only; the instrumented binary
+# is never benchmarked. A fallback may still reject the candidate.
 # Reports are local optimization reports — not ISO certificates or certified results.
 
 project: match-engine
 kind: elf
 binary: ./target/release/match-engine
-build: cargo build --release
+build: env RUSTFLAGS='-C link-arg=-Wl,--emit-relocs' cargo build --release
 test: ./scripts/test.sh
 benchmark: ./scripts/bench.sh
 profile: ./scripts/workload.sh

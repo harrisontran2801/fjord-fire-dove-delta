@@ -276,6 +276,12 @@ pub fn evaluate(cfg: &QuenchConfig, doctor: &DoctorReport) -> PreflightReport {
             IssueSeverity::Warning,
             "perf is Unavailable; no LBR profile will be collected.",
         ));
+    } else {
+        issues.push(issue(
+            "lbr",
+            IssueSeverity::Warning,
+            "Optimize probes LBR with `perf record -e cycles:u -j any,u -- sleep 0.3`. If that fails, BOLT instrumentation is used when libbolt_rt_instr.a is present. Instrumentation is not production sampling and is never benchmarked.",
+        ));
     }
     if !tool_available(doctor, "llvm-bolt") {
         issues.push(issue(
