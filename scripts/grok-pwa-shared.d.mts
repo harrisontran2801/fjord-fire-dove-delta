@@ -70,7 +70,7 @@ export declare function normalizeHeadContext(ctx?: GrokHeadContext): {
   creator: string;
   creatorId: string;
   host: string;
-  cwd: string;
+  cwd?: string;
   site: OgSite;
 };
 export declare function injectGrokPwaHead(html: string, ctx?: GrokHeadContext): string;

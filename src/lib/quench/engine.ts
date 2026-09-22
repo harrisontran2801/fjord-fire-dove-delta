@@ -35,6 +35,14 @@ function cloneMetrics(m: Metrics): Metrics {
   return { ...m };
 }
 
+function metricsFromNative(bytes: number, p99Ms: number): Metrics {
+  return {
+    ...EMPTY_METRICS,
+    artifactBytes: Number.isFinite(bytes) ? bytes : 0,
+    p99Ms: Number.isFinite(p99Ms) ? p99Ms : 0,
+  };
+}
+
 export function runModeFor(artifact: Artifact): RunMode {
   if (artifact.source === "agent") return "agent";
   if (artifact.source === "upload") return "inspect";
@@ -347,6 +355,9 @@ export function createAgentRun(args: {
     ok: args.ok,
     report: native,
   });
+
+  const metricsBefore = metricsFromNative(sizeBefore, p95Before);
+  const metricsAfter = metricsFromNative(sizeAfter, p95After);
 
   const result: RunResult = {
     before: metricsBefore,

@@ -253,13 +253,14 @@ export function readOgSite(cwd = process.cwd()) {
 }
 
 /** Public path of an on-disk share card, or "" if neither file exists. */
-export function ogCardPublicPath(cwd = process.cwd()) {
+export function ogCardPublicPath(cwd) {
+  if (typeof cwd !== "string" || cwd.length === 0) return "";
   if (existsSync(join(cwd, "public/og.jpg"))) return "/og.jpg";
   if (existsSync(join(cwd, "public/og.png"))) return "/og.png";
   return "";
 }
 
-function detectCustomOgCard(cwd = process.cwd(), site = {}) {
+function detectCustomOgCard(cwd, site = {}) {
   if (ogCardPublicPath(cwd)) return true;
   // Vercel runtime has no public/: trust a bake that already saw the file.
   return siteHasCustomCard(site) || Boolean(String(site.image ?? "").trim());
@@ -322,7 +323,7 @@ export function siteHasCustomCard(site = {}) {
  * Vercel: the bake (`card=custom` / `image`) because the function cannot stat public/.
  * Otherwise empty — caller emits the og.grok.me placeholder.
  */
-export function resolveOgCardAsset(site = {}, cwd = process.cwd()) {
+export function resolveOgCardAsset(site = {}, cwd) {
   return ogCardPublicPath(cwd) || (detectCustomOgCard(cwd, site) ? String(site.image ?? "").trim() || "/og.jpg" : "");
 }
 
@@ -338,7 +339,7 @@ export function grokOgHeadTags({
   appName = DEFAULT_APP_NAME,
   site = {},
   documentTitle = "",
-  cwd = process.cwd(),
+  cwd,
 } = {}) {
   const title = resolveOgTitle(site, appName, host, documentTitle);
   const publicHost = resolvePublicHost(host);
@@ -401,15 +402,19 @@ function insertBeforeHeadClose(html, snippet) {
 }
 
 export function normalizeHeadContext(ctx = {}) {
-  const cwd = ctx.cwd ?? process.cwd();
-  // Middleware passes a baked `site`. Still consult the workspace so a
-  // public/og.jpg generated after that snapshot (or missed by a wrong cwd)
-  // wins over the og.grok.me placeholder. Vercel has no public/ to read, so
-  // a correct bake is unchanged.
-  const site = applyCustomCardFromFs(
-    ctx.site !== undefined ? ctx.site : snapshotOgIdentity(cwd).site,
-    cwd,
-  );
+  // Only scan the workspace when the caller passed a cwd. Unit tests omit it
+  // so a developing app's site.json / public/og.jpg cannot leak into the
+  // document-title / host-slug / placeholder-card fallbacks they assert.
+  // Vite always passes `config.root`; Nitro passes a baked `site` and no cwd.
+  const cwd = typeof ctx.cwd === "string" && ctx.cwd.length > 0 ? ctx.cwd : undefined;
+  const site =
+    ctx.site !== undefined
+      ? cwd
+        ? applyCustomCardFromFs(ctx.site, cwd)
+        : { ...ctx.site }
+      : cwd
+        ? snapshotOgIdentity(cwd).site
+        : {};
   const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, ctx.host ?? "");
   return {
     appName,
@@ -496,7 +501,7 @@ export function createHeadInjector(ctx = {}) {
       creator: normalized.creator,
       creatorId: normalized.creatorId,
       host: normalized.host,
-      cwd: normalized.cwd,
+      ...(normalized.cwd ? { cwd: normalized.cwd } : {}),
       site: normalized.site,
     });
 
