@@ -1,0 +1,27 @@
+# Quench project config — keep this next to the crate / binary you want optimized.
+#
+# Native agent setup (loopback only):
+#   npm run agent:build
+#   QUENCH_WORKSPACE=$PWD npm run agent:serve
+#   quench-agent doctor --json
+#   quench-agent optimize --config samples/match-engine/quench.yaml
+#
+# Environment (serve):
+#   QUENCH_WORKSPACE       allowed root for HTTP configPath (default: discovered repo root)
+#   QUENCH_SAMPLE_CONFIG   relative sample path (default: samples/match-engine/quench.yaml)
+#   QUENCH_ALLOWED_ORIGINS extra browser origins, comma-separated (localhost:8080 is already allowed)
+#
+# HTTP /v1/optimize rejects unknown Origins and any configPath outside QUENCH_WORKSPACE.
+# Uploaded files in the Studio are inspection-only unless you point the agent at a real quench.yaml.
+# Missing perf / llvm-bolt are reported as Unavailable. Docker/OCI is inspect/recommendation only.
+# Reports are local optimization reports — not ISO certificates or certified results.
+
+project: match-engine
+kind: elf
+binary: ./target/release/match-engine
+build: cargo build --release
+test: cargo test
+benchmark: ./scripts/bench.sh
+profile: ./scripts/workload.sh
+max_regression_percent: 2
+min_improvement_percent: 1
