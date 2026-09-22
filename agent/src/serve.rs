@@ -102,14 +102,14 @@ fn json_res(stream: &mut impl Write, status: &str, value: serde_json::Value, ori
     respond(stream, status, &body, "application/json", origin);
 }
 
-fn status_body() -> serde_json::Value {
+fn status_body(bind: &str, socket: &str) -> serde_json::Value {
     let sample = sample_config_path();
     json!({
         "ok": true,
         "name": "quench-agent",
         "version": env!("CARGO_PKG_VERSION"),
-        "listen": DEFAULT_BIND,
-        "socket": DEFAULT_SOCKET,
+        "listen": bind,
+        "socket": socket,
         "platform": format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
         "workspace": workspace_root().display().to_string(),
         "sampleConfig": default_sample_rel(),
@@ -117,7 +117,7 @@ fn status_body() -> serde_json::Value {
     })
 }
 
-fn handle(req: HttpReq, mut stream: impl Write) {
+fn handle(req: HttpReq, mut stream: impl Write, bind: &str, socket: &str) {
     let origin = origin_of(&req).map(|s| s.to_string());
     let origin_ref = origin.as_deref();
 
@@ -164,7 +164,7 @@ fn handle(req: HttpReq, mut stream: impl Write) {
 
     match (req.method.as_str(), path.as_str()) {
         ("GET", "/health") | ("GET", "/v1/status") | ("GET", "/v1/health") => {
-            json_res(&mut stream, "200 OK", status_body(), origin_ref);
+            json_res(&mut stream, "200 OK", status_body(bind, socket), origin_ref);
         }
         ("GET", "/v1/doctor") | ("GET", "/doctor") => {
             let report = run_doctor();
@@ -341,9 +341,9 @@ fn handle(req: HttpReq, mut stream: impl Write) {
     }
 }
 
-fn serve_tcp_conn(mut stream: TcpStream) {
+fn serve_tcp_conn(mut stream: TcpStream, bind: String, socket: String) {
     match read_request(&mut stream) {
-        Ok(req) => handle(req, stream),
+        Ok(req) => handle(req, stream, &bind, &socket),
         Err(e) => {
             if e.contains("too large") {
                 json_res(
@@ -357,9 +357,9 @@ fn serve_tcp_conn(mut stream: TcpStream) {
     }
 }
 
-fn serve_unix_conn(mut stream: std::os::unix::net::UnixStream) {
+fn serve_unix_conn(mut stream: std::os::unix::net::UnixStream, bind: String, socket: String) {
     match read_request(&mut stream) {
-        Ok(req) => handle(req, stream),
+        Ok(req) => handle(req, stream, &bind, &socket),
         Err(_) => {}
     }
 }
@@ -376,16 +376,24 @@ pub fn serve(bind: &str, socket: &str) -> Result<(), String> {
     let unix = UnixListener::bind(socket).map_err(|e| format!("bind unix {socket}: {e}"))?;
     restrict_unix_socket(std::path::Path::new(socket))?;
     println!("quench-agent serve {bind} unix:{socket}");
+    let unix_bind = bind.to_string();
+    let unix_socket = socket.to_string();
     thread::spawn(move || {
         for conn in unix.incoming() {
             if let Ok(s) = conn {
-                thread::spawn(move || serve_unix_conn(s));
+                let bind = unix_bind.clone();
+                let socket = unix_socket.clone();
+                thread::spawn(move || serve_unix_conn(s, bind, socket));
             }
         }
     });
+    let tcp_bind = bind.to_string();
+    let tcp_socket = socket.to_string();
     for conn in tcp.incoming() {
         if let Ok(s) = conn {
-            thread::spawn(move || serve_tcp_conn(s));
+            let bind = tcp_bind.clone();
+            let socket = tcp_socket.clone();
+            thread::spawn(move || serve_tcp_conn(s, bind, socket));
         }
     }
     Ok(())
@@ -400,7 +408,7 @@ mod tests {
         let mut input = Cursor::new(raw.as_bytes().to_vec());
         let req = read_request(&mut input).expect("parse request");
         let mut out = Vec::new();
-        handle(req, &mut out);
+        handle(req, &mut out, DEFAULT_BIND, DEFAULT_SOCKET);
         String::from_utf8_lossy(&out).into_owned()
     }
 

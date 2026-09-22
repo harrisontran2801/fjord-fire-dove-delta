@@ -2,7 +2,7 @@ import { artifactFromInspection, FILE_TOO_LARGE, inspectFile, MAX_UPLOAD_BYTES }
 import type { AgentDoctor, Artifact, NativeReport } from "./types.ts";
 
 const PROXY = "/api/agent";
-const DIRECT = "http://127.0.0.1:4783";
+const DIRECT = String(import.meta.env?.VITE_QUENCH_AGENT_URL ?? "http://127.0.0.1:4783").replace(/\/+$/, "");
 
 export const DEFAULT_SAMPLE_CONFIG = "samples/match-engine/quench.yaml";
 
@@ -354,4 +354,3 @@ export async function agentOptimize(
       : error,
   };
 }
-

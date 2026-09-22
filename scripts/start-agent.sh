@@ -27,7 +27,7 @@ if [ "${1:-}" = "--print-env" ]; then
 fi
 
 case "$BIND" in
-  127.0.0.1:*|localhost:*|[::1]:*) ;;
+  '127.0.0.1:'*|'localhost:'*|'[::1]:'*) ;;
   *)
     echo "refusing to bind quench-agent on $BIND (loopback only)" >&2
     exit 1

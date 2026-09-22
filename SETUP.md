@@ -19,6 +19,7 @@ Startup scripts resolve the repository root from their own location. They do not
 | `QUENCH_AGENT_BIN` | `$ROOT/agent/target/release/quench-agent` |
 | `QUENCH_AGENT_SOCKET` | `/tmp/quench-agent.sock` |
 | `QUENCH_AGENT_BIND` | `127.0.0.1:4783` (loopback only) |
+| `VITE_QUENCH_AGENT_URL` | `http://127.0.0.1:4783` for direct browser fallback |
 
 ## Native agent (Linux x86_64)
 
@@ -38,6 +39,8 @@ quench-agent optimize --config samples/match-engine/quench.yaml
 ```
 
 The match-engine sample stays at `samples/match-engine/` and is the **default** native sample only. Point `QUENCH_SAMPLE_CONFIG` at another in-workspace `quench.yaml` if you want a different native sample. Studio labels the run from the native report (`project`, artifact path, kind, size, hashes), not from a hard-coded match-engine card.
+
+When using a non-default bind, set `QUENCH_AGENT_BIND` for the Vite proxy and set `VITE_QUENCH_AGENT_URL` to the same HTTP address if direct browser fallback is needed.
 
 ## Local agent security
 
