@@ -90,6 +90,10 @@ export function NativeFacts({ run }: { run: Run }) {
               : "—"
           }
         />
+        <Fact label="Build" value={n.buildCommand ?? "—"} mono />
+        <Fact label="Test" value={n.testCommand ?? "—"} mono />
+        <Fact label="Profile" value={n.profileCommand ?? "—"} mono />
+        <Fact label="Benchmark" value={n.benchmarkCommand ?? "—"} mono />
         <Fact
           label="Median / p95"
           value={`median ${fmtMs(n.medianMs?.baseline)} → ${fmtMs(n.medianMs?.candidate)} ms · p95 ${fmtMs(n.p95Ms?.baseline)} → ${fmtMs(n.p95Ms?.candidate)} ms`}
@@ -251,11 +255,12 @@ export function NativeReportArticle({ run }: { run: Run }) {
         </div>
       </dl>
 
-      {n.buildCommand || n.testCommand || n.benchmarkCommand || n.reproducibleCommand ? (
+      {n.buildCommand || n.testCommand || n.benchmarkCommand || n.profileCommand || n.reproducibleCommand ? (
         <div className="mt-8 border-t border-border pt-6 font-mono text-xs text-muted">
           {n.reproducibleCommand ? <p className="break-all text-fg">{n.reproducibleCommand}</p> : null}
           {n.buildCommand ? <p className="mt-2 break-all">build {n.buildCommand}</p> : null}
           {n.testCommand ? <p className="mt-1 break-all">test {n.testCommand}</p> : null}
+          {n.profileCommand ? <p className="mt-1 break-all">profile {n.profileCommand}</p> : null}
           {n.benchmarkCommand ? <p className="mt-1 break-all">bench {n.benchmarkCommand}</p> : null}
         </div>
       ) : null}

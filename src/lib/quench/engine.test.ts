@@ -56,6 +56,91 @@ test("artifactFromNativeReport uses report identity instead of match-engine", ()
   assert.equal(artifact.sizeBytes, 1024);
 });
 
+test("createAgentRun maps a kept native candidate as complete, not modeled demo", () => {
+  const report = {
+    ok: true,
+    status: "complete",
+    project: "match-engine",
+    kind: "elf",
+    inputPath: "/tmp/match-engine/target/release/match-engine",
+    configPath: "samples/match-engine/quench.yaml",
+    buildCommand: "cargo build --release",
+    testCommand: "./scripts/test.sh",
+    profileCommand: "./scripts/workload.sh",
+    benchmarkCommand: "./scripts/bench.sh",
+    baselineSha256: "aa".repeat(32),
+    candidateSha256: "bb".repeat(32),
+    artifactSize: { baselineBytes: 4_700_184, candidateBytes: 404_352 },
+    testResult: "Passed the supplied test suite",
+    keptCandidate: true,
+    minImprovementPercent: 1,
+    maxRegressionPercent: 2,
+    medianImprovementPercent: 1.7,
+    medianMs: { baseline: 592.1, candidate: 582.0 },
+    p95Ms: { baseline: 594.1, candidate: 586.5 },
+    toolVersions: { strip: { status: "ok" }, "llvm-bolt": { status: "unavailable" } },
+  };
+  const artifact = artifactFromNativeReport(report, "samples/match-engine/quench.yaml");
+  const run = createAgentRun({
+    artifact,
+    report,
+    logs: ["[prove] kept candidate"],
+    transformsApplied: [{ tool: "strip", status: "applied", detail: "strip --strip-unneeded" }],
+    transformsFailed: [{ tool: "llvm-bolt", status: "Unavailable", detail: "not found on PATH" }],
+    runId: "qnch_keep_1",
+    agentStatus: "complete",
+    ok: true,
+  });
+  assert.equal(run.status, "complete");
+  assert.equal(run.mode, "agent");
+  assert.equal(run.result.modeled, false);
+  assert.equal(run.result.native?.keptCandidate, true);
+  assert.equal(run.result.native?.buildCommand, "cargo build --release");
+  assert.equal(run.result.native?.profileCommand, "./scripts/workload.sh");
+  assert.equal(run.result.native?.benchmarkCommand, "./scripts/bench.sh");
+  assert.equal(run.result.native?.minImprovementPercent, 1);
+  assert.equal(run.result.native?.maxRegressionPercent, 2);
+  assert.equal(run.result.native?.medianImprovementPercent, 1.7);
+  assert.equal(run.artifact.source, "agent");
+});
+
+test("unavailable native tools stay native reports, not demo complete", () => {
+  const report = {
+    ok: true,
+    status: "complete",
+    project: "bare-elf",
+    kind: "elf",
+    inputPath: "/tmp/bare",
+    buildCommand: "gcc -o app main.c",
+    testCommand: "./test.sh",
+    profileCommand: "./app",
+    benchmarkCommand: "./bench.sh",
+    keptCandidate: false,
+    reason: "No candidate was produced. Missing tools are listed as Unavailable; success was not invented.",
+    minImprovementPercent: 1,
+    maxRegressionPercent: 2,
+    testResult: "Passed the supplied test suite",
+    toolVersions: { "llvm-bolt": { status: "unavailable" }, strip: { status: "unavailable" } },
+  };
+  const run = createAgentRun({
+    artifact: artifactFromNativeReport(report),
+    report,
+    logs: ["[optimize] llvm-bolt: Unavailable"],
+    transformsApplied: [],
+    transformsFailed: [
+      { tool: "llvm-bolt", status: "Unavailable", detail: "not found on PATH" },
+      { tool: "strip", status: "Unavailable", detail: "not found on PATH" },
+    ],
+    runId: "qnch_unavail",
+    agentStatus: "complete",
+    ok: true,
+  });
+  assert.equal(run.mode, "agent");
+  assert.equal(run.result.modeled, false);
+  assert.equal(run.result.native?.keptCandidate, false);
+  assert.equal(run.result.tools.some((t) => t.status === "unavailable"), true);
+});
+
 test("nativeRunStatus maps verification_failed separately from complete", () => {
   assert.equal(
     nativeRunStatus({
@@ -74,3 +159,5 @@ test("nativeRunStatus maps verification_failed separately from complete", () => 
     "complete",
   );
 });
+
+

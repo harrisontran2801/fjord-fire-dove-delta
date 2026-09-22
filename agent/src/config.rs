@@ -169,7 +169,7 @@ project: match-engine
 kind: elf
 binary: ./target/release/match-engine
 build: cargo build --release
-test: cargo test
+test: ./scripts/test.sh
 benchmark: ./scripts/bench.sh
 profile: ./scripts/workload.sh
 max_regression_percent: 2

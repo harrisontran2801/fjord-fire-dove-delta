@@ -247,7 +247,10 @@ pub fn doctor_text(report: &DoctorReport) -> String {
         ));
     }
     if !report.supported_platform {
-        lines.push("Native optimize is disabled: Linux x86_64 required.".into());
+        lines.push(
+            "Native optimize is disabled: Linux x86_64 required. Windows and macOS are not supported."
+                .into(),
+        );
     }
     lines.join("\n") + "\n"
 }

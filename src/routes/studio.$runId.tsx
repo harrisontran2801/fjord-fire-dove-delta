@@ -541,6 +541,8 @@ function ProvePanel({ run, onOpenCert }: { run: Run; onOpenCert: () => void }) {
                   <p className="break-all font-mono">{n.reproducibleCommand}</p>
                 ) : null}
                 {n?.buildCommand ? <p>build {n.buildCommand}</p> : null}
+                {n?.testCommand ? <p>test {n.testCommand}</p> : null}
+                {n?.profileCommand ? <p>profile {n.profileCommand}</p> : null}
                 {n?.benchmarkCommand ? <p>bench {n.benchmarkCommand}</p> : null}
                 {n?.minImprovementPercent != null ? (
                   <p>

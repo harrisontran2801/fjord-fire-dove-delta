@@ -319,6 +319,7 @@ export function createAgentRun(args: {
     buildCommand: args.report.buildCommand ? String(args.report.buildCommand) : undefined,
     testCommand: args.report.testCommand ? String(args.report.testCommand) : undefined,
     benchmarkCommand: args.report.benchmarkCommand ? String(args.report.benchmarkCommand) : undefined,
+    profileCommand: args.report.profileCommand ? String(args.report.profileCommand) : undefined,
     toolVersions: args.report.toolVersions,
     baselineSha256: args.report.baselineSha256 ? String(args.report.baselineSha256) : undefined,
     candidateSha256: args.report.candidateSha256 == null ? null : String(args.report.candidateSha256),

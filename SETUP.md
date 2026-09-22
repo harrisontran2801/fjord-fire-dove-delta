@@ -21,24 +21,48 @@ Startup scripts resolve the repository root from their own location. They do not
 | `QUENCH_AGENT_BIND` | `127.0.0.1:4783` (loopback only) |
 | `VITE_QUENCH_AGENT_URL` | `http://127.0.0.1:4783` for direct browser fallback |
 
-## Native agent (Linux x86_64)
+## Native agent — Linux x86_64 only
 
-Requires Rust (`cargo`, `rustc`). If they are missing, skip this section — the UI will show an unavailable state.
+Native optimize **does not run on Windows or macOS**. On those hosts the Studio UI still works in Demo / Inspection mode. `quench-agent doctor` reports the platform as Unavailable and `optimize` refuses to start.
+
+### Linux prerequisites
+
+Required for `samples/match-engine/quench.yaml`:
+
+- Linux x86_64
+- `rustc` and `cargo` (Rust toolchain)
+- GNU `strip` (`binutils`)
+- POSIX `sh`
+
+Optional. Missing tools are recorded as **Unavailable**; the agent does not invent native metrics for them:
+
+- `perf` (LBR profile)
+- `llvm-bolt` (layout rewrite)
+- `clang` (not used by the match-engine sample)
+- `docker` / `containerd` (Docker/OCI rewrite is not implemented)
+
+### Native run (match-engine)
+
+From the repository root:
 
 ```sh
-export QUENCH_WORKSPACE=/path/to/this/repo
-export QUENCH_SAMPLE_CONFIG=samples/match-engine/quench.yaml   # optional, relative to the workspace
+export QUENCH_WORKSPACE="$PWD"
+export QUENCH_SAMPLE_CONFIG=samples/match-engine/quench.yaml   # optional; this is the default
 npm run agent:build
+npm run agent:doctor
+./agent/target/release/quench-agent optimize --config samples/match-engine/quench.yaml
+```
+
+That command builds the sample with `cargo build --release`, runs `./scripts/test.sh` (`cargo test` plus the binary `--self-test`), profiles with `./scripts/workload.sh`, and benches with `./scripts/bench.sh`. `perf` / `llvm-bolt` are skipped with **Unavailable** when they are not on PATH. `strip` is applied when present. The report includes baseline and candidate identity, the real commands, tool availability, measured median improvement, `min_improvement_percent`, `max_regression_percent`, and whether the candidate was kept or rejected. Without `llvm-bolt`, a strip-only candidate is often **rejected** when median improvement is below `min_improvement_percent` (default 1%). That is the gate working — size-only change is not invented as a runtime win.
+
+Serve the agent so Studio can run the same sample:
+
+```sh
 npm run agent:serve
 # or:  ./agent/target/release/quench-agent serve --bind 127.0.0.1:4783
 ```
 
-```sh
-npm run agent:doctor
-quench-agent optimize --config samples/match-engine/quench.yaml
-```
-
-The match-engine sample stays at `samples/match-engine/` and is the **default** native sample only. Point `QUENCH_SAMPLE_CONFIG` at another in-workspace `quench.yaml` if you want a different native sample. Studio labels the run from the native report (`project`, artifact path, kind, size, hashes), not from a hard-coded match-engine card.
+Then open Studio and use **Run native sample**. Studio labels the run from the native report (`project`, artifact path, kind, size, hashes), not from a modeled demo card.
 
 When using a non-default bind, set `QUENCH_AGENT_BIND` for the Vite proxy and set `VITE_QUENCH_AGENT_URL` to the same HTTP address if direct browser fallback is needed.
 
@@ -73,3 +97,4 @@ When OFF, inspection history may be retained locally alongside demo and native a
 - `perf` and `llvm-bolt` are reported **Unavailable** when they are not on PATH.
 - Docker/OCI rewrite is not implemented (inspect and recommendations only).
 - Local reports are not ISO certificates or certified results.
+- Windows/macOS: no native optimize. Use Demo / Inspection in Studio.

@@ -3,12 +3,29 @@ use serde_json::json;
 
 pub fn report_text(run: &PipelineRun) -> String {
     let r = &run.report;
+    let kept = r
+        .get("keptCandidate")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let mut lines = vec![
         format!("quench-agent report {}", run.run_id),
         format!("status           {:?}", run.status),
         format!("project          {}", run.project),
+        format!("kind             {}", run.kind),
         format!("input path       {}", run.input_path),
         format!("config           {}", run.config_path),
+        format!(
+            "baseline identity {}",
+            r.get("baselineSha256")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-")
+        ),
+        format!(
+            "candidate identity {}",
+            r.get("candidateSha256")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-")
+        ),
         format!(
             "build command    {}",
             r.get("buildCommand")
@@ -20,20 +37,14 @@ pub fn report_text(run: &PipelineRun) -> String {
             r.get("testCommand").and_then(|v| v.as_str()).unwrap_or("-")
         ),
         format!(
+            "profile command  {}",
+            r.get("profileCommand")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-")
+        ),
+        format!(
             "benchmark        {}",
             r.get("benchmarkCommand")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-")
-        ),
-        format!(
-            "baseline sha256  {}",
-            r.get("baselineSha256")
-                .and_then(|v| v.as_str())
-                .unwrap_or("-")
-        ),
-        format!(
-            "candidate sha256 {}",
-            r.get("candidateSha256")
                 .and_then(|v| v.as_str())
                 .unwrap_or("-")
         ),
@@ -55,12 +66,47 @@ pub fn report_text(run: &PipelineRun) -> String {
     if let Some(p95) = r.get("p95Ms") {
         lines.push(format!("p95 ms           {p95}"));
     }
+    if let Some(impr) = r.get("medianImprovementPercent").and_then(|v| v.as_f64()) {
+        lines.push(format!("median improvement {impr:.3}%"));
+    }
+    lines.push(format!(
+        "min_improvement_percent {}",
+        r.get("minImprovementPercent")
+            .and_then(|v| v.as_f64())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "-".into())
+    ));
+    lines.push(format!(
+        "max_regression_percent  {}",
+        r.get("maxRegressionPercent")
+            .and_then(|v| v.as_f64())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "-".into())
+    ));
+    lines.push(format!(
+        "candidate        {}",
+        if kept {
+            "kept"
+        } else {
+            "rejected / not produced"
+        }
+    ));
+    if let Some(reason) = r.get("reason").and_then(|v| v.as_str()) {
+        lines.push(format!("decision         {reason}"));
+    }
     lines.push(format!(
         "repetitions      {}",
         r.get("benchmarkRepetitions")
             .and_then(|v| v.as_u64())
             .unwrap_or(0)
     ));
+    lines.push("tools:".into());
+    if let Some(obj) = r.get("toolVersions").and_then(|v| v.as_object()) {
+        for (id, info) in obj {
+            let status = info.get("status").and_then(|v| v.as_str()).unwrap_or("-");
+            lines.push(format!("  {id}: {status}"));
+        }
+    }
     lines.push("transforms applied:".into());
     if run.transforms_applied.is_empty() {
         lines.push("  (none)".into());

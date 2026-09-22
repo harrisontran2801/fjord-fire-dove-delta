@@ -293,7 +293,7 @@ fn tool_versions(doctor: &DoctorReport) -> Value {
     Value::Object(map)
 }
 
-fn finalize_report(run: &mut PipelineRun, extra: Value) {
+fn finalize_report(run: &mut PipelineRun, cfg: &QuenchConfig, extra: Value) {
     let mut report = extra;
     if let Some(obj) = report.as_object_mut() {
         obj.insert("runId".into(), json!(run.run_id));
@@ -301,6 +301,18 @@ fn finalize_report(run: &mut PipelineRun, extra: Value) {
         obj.insert("kind".into(), json!(run.kind));
         obj.insert("inputPath".into(), json!(run.input_path));
         obj.insert("configPath".into(), json!(run.config_path));
+        obj.insert("buildCommand".into(), json!(cfg.build));
+        obj.insert("testCommand".into(), json!(cfg.test));
+        obj.insert("benchmarkCommand".into(), json!(cfg.benchmark));
+        obj.insert("profileCommand".into(), json!(cfg.profile));
+        obj.insert(
+            "minImprovementPercent".into(),
+            json!(cfg.min_improvement_percent),
+        );
+        obj.insert(
+            "maxRegressionPercent".into(),
+            json!(cfg.max_regression_percent),
+        );
         obj.insert("logs".into(), json!(run.logs));
         obj.insert("commands".into(), json!(run.commands));
         obj.insert("transformsApplied".into(), json!(run.transforms_applied));
@@ -313,6 +325,7 @@ fn finalize_report(run: &mut PipelineRun, extra: Value) {
             )),
         );
         obj.insert("status".into(), json!(run.status));
+        obj.entry("keptCandidate").or_insert(json!(false));
         obj.insert(
             "disclaimer".into(),
             json!("Local optimization report. Not an ISO certificate, third-party certificate, or certified result."),
@@ -380,6 +393,7 @@ fn optimize_docker(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     ];
     finalize_report(
         &mut run,
+        cfg,
         json!({
             "ok": true,
             "keptCandidate": false,
@@ -446,6 +460,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         run.status = RunStatus::Failed;
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": false,
                 "error": "baseline build failed",
@@ -458,10 +473,12 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     }
 
     let binary = resolve_in_root(&cfg.project_root, cfg.binary.as_deref().unwrap());
+    let binary = std::fs::canonicalize(&binary).unwrap_or(binary);
     if !binary.is_file() {
         run.status = RunStatus::Failed;
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": false,
                 "error": format!("binary not found after build: {}", binary.display()),
@@ -488,6 +505,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
             run.status = RunStatus::Failed;
             finalize_report(
                 &mut run,
+                cfg,
                 json!({"ok": false, "error": e, "keptCandidate": false}),
             );
             write_run(&run_dir, &run)?;
@@ -523,6 +541,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         run.status = RunStatus::Failed;
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": false,
                 "error": "baseline tests failed; refusing to optimize",
@@ -546,6 +565,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
             run.status = RunStatus::Failed;
             finalize_report(
                 &mut run,
+                cfg,
                 json!({"ok": false, "error": e, "keptCandidate": false}),
             );
             write_run(&run_dir, &run)?;
@@ -697,6 +717,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         );
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": true,
                 "keptCandidate": false,
@@ -752,6 +773,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         let _ = std::fs::remove_file(&candidate_path);
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": false,
                 "keptCandidate": false,
@@ -785,6 +807,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
             run.status = RunStatus::Failed;
             finalize_report(
                 &mut run,
+                cfg,
                 json!({"ok": false, "error": e, "keptCandidate": false}),
             );
             write_run(&run_dir, &run)?;
@@ -808,6 +831,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         let _ = std::fs::remove_file(&candidate_path);
         finalize_report(
             &mut run,
+            cfg,
             json!({
                 "ok": false,
                 "keptCandidate": false,
@@ -847,6 +871,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
     );
     finalize_report(
         &mut run,
+        cfg,
         json!({
             "ok": true,
             "keptCandidate": true,
@@ -985,6 +1010,7 @@ mod tests {
         let (root, _home, _guard) = setup_fixture("fail-test");
         let cfg = load_config(&root.join("quench.yaml")).unwrap();
         let run = optimize(&cfg).expect("optimize should return a report");
+        assert_core_native_report(&run);
         assert_eq!(run.status, RunStatus::VerificationFailed);
         assert_eq!(run.report["keptCandidate"], false);
         let test_result = run.report["testResult"].as_str().unwrap_or("");
@@ -1005,6 +1031,7 @@ mod tests {
         let (root, _home, _guard) = setup_fixture("regression");
         let cfg = load_config(&root.join("quench.yaml")).unwrap();
         let run = optimize(&cfg).expect("optimize should return a report");
+        assert_core_native_report(&run);
         assert_eq!(run.status, RunStatus::Failed);
         assert_eq!(run.report["keptCandidate"], false);
         let reason = run.report["reason"].as_str().unwrap_or("");
@@ -1024,6 +1051,7 @@ mod tests {
         std::env::set_var("QUENCH_FORCE_UNAVAILABLE", "llvm-bolt,perf");
         let cfg = load_config(&root.join("quench.yaml")).unwrap();
         let run = optimize(&cfg).expect("optimize should return a report");
+        assert_core_native_report(&run);
         let bolt = run
             .transforms_failed
             .iter()
@@ -1043,6 +1071,7 @@ mod tests {
         std::env::set_var("QUENCH_FORCE_UNAVAILABLE", "llvm-bolt,perf,strip");
         let cfg = load_config(&root.join("quench.yaml")).unwrap();
         let run = optimize(&cfg).expect("optimize should return a report");
+        assert_core_native_report(&run);
         assert_eq!(run.status, RunStatus::Complete);
         assert_eq!(run.report["keptCandidate"], false);
         let reason = run.report["reason"].as_str().unwrap_or("");
@@ -1063,5 +1092,65 @@ mod tests {
             run.report["testResult"].as_str().unwrap(),
             "Passed the supplied test suite"
         );
+    }
+
+    fn assert_core_native_report(run: &PipelineRun) {
+        let r = &run.report;
+        assert!(
+            r.get("buildCommand").and_then(|v| v.as_str()).is_some(),
+            "buildCommand"
+        );
+        assert!(
+            r.get("testCommand").and_then(|v| v.as_str()).is_some(),
+            "testCommand"
+        );
+        assert!(
+            r.get("benchmarkCommand").and_then(|v| v.as_str()).is_some(),
+            "benchmarkCommand"
+        );
+        assert!(r.get("profileCommand").is_some(), "profileCommand");
+        assert!(r
+            .get("minImprovementPercent")
+            .and_then(|v| v.as_f64())
+            .is_some());
+        assert!(r
+            .get("maxRegressionPercent")
+            .and_then(|v| v.as_f64())
+            .is_some());
+        assert!(r.get("keptCandidate").and_then(|v| v.as_bool()).is_some());
+        assert!(r.get("toolVersions").and_then(|v| v.as_object()).is_some());
+        assert!(r.get("project").and_then(|v| v.as_str()).is_some());
+        assert!(r
+            .get("reproducibleCommand")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .contains("optimize --config"));
+    }
+
+    #[test]
+    fn keeps_candidate_when_median_improvement_meets_threshold() {
+        let (root, _home, _guard) = setup_fixture("success");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize should return a report");
+        assert_core_native_report(&run);
+        assert_eq!(run.status, RunStatus::Complete);
+        assert_eq!(run.report["ok"], true);
+        assert_eq!(run.report["keptCandidate"], true);
+        assert!(run.report["baselineSha256"].as_str().unwrap_or("").len() >= 16);
+        assert!(run.report["candidateSha256"].as_str().unwrap_or("").len() >= 16);
+        let impr = run.report["medianImprovementPercent"]
+            .as_f64()
+            .expect("medianImprovementPercent");
+        assert!(impr >= 1.0, "impr={impr}");
+        assert_eq!(run.report["minImprovementPercent"], 1.0);
+        assert_eq!(run.report["maxRegressionPercent"], 2.0);
+        assert_eq!(
+            run.report["testResult"].as_str().unwrap(),
+            "Passed the supplied test suite"
+        );
+        assert!(run
+            .transforms_applied
+            .iter()
+            .any(|t| t.tool == "strip" && t.status == "applied"));
     }
 }

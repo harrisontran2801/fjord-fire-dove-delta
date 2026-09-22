@@ -133,6 +133,7 @@ export interface NativeReport {
   buildCommand?: string;
   testCommand?: string;
   benchmarkCommand?: string;
+  profileCommand?: string;
   toolVersions?: Record<string, { status?: string; version?: string; detail?: string; path?: string }>;
   baselineSha256?: string;
   candidateSha256?: string | null;
