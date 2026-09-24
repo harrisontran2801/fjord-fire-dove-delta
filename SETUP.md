@@ -54,6 +54,8 @@ From the repository root:
 ```sh
 export QUENCH_WORKSPACE="$PWD"
 export QUENCH_SAMPLE_CONFIG=samples/match-engine/quench.yaml   # optional; this is the default
+# second public sample, same gates, not a promised win:
+# export QUENCH_SAMPLE_CONFIG=samples/opcode-vm/quench.yaml
 npm run agent:build
 npm run agent:doctor
 ./agent/target/release/quench-agent preflight --config samples/match-engine/quench.yaml

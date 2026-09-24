@@ -1,0 +1,10 @@
+[package]
+name = "opcode-vm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[profile.release]
+debug = 1
+lto = false
+codegen-units = 1

@@ -1,0 +1,13 @@
+# Public technical sample. Not customer evidence and not a promised speedup.
+# Gates match the match-engine sample. A reject is a valid result.
+project: opcode-vm
+kind: elf
+binary: ./target/release/opcode-vm
+build: env RUSTFLAGS='-C link-arg=-Wl,--emit-relocs' cargo build --release
+test: ./scripts/test.sh
+benchmark: ./scripts/bench.sh
+profile: ./scripts/workload.sh
+max_regression_percent: 2
+min_improvement_percent: 1
+benchmark_repetitions: 15
+benchmark_warmup: 2

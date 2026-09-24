@@ -581,4 +581,20 @@ benchmark: ../../etc/passwd
             .find(|c| c.role == "profile")
             .is_some_and(|c| c.command.as_deref() == Some("./scripts/workload.sh")));
     }
+
+    #[test]
+    fn bundled_opcode_vm_preflight_keeps_the_same_gates() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/opcode-vm/quench.yaml");
+        let report = run_preflight(&path);
+        assert!(report.ok, "{}", preflight_text(&report));
+        assert_eq!(report.project.as_deref(), Some("opcode-vm"));
+        assert_eq!(report.min_improvement_percent, Some(1.0));
+        assert_eq!(report.max_regression_percent, Some(2.0));
+        assert!(report
+            .commands
+            .iter()
+            .find(|c| c.role == "benchmark")
+            .is_some_and(|c| c.command.as_deref() == Some("./scripts/bench.sh")));
+    }
 }

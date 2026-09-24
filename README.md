@@ -38,4 +38,7 @@ Missing tools (`perf`, `llvm-bolt`, …) are reported **Unavailable**. A strip-o
 
 ## Native pilots
 
-On a Linux x86_64 host, start with [PILOT.md](PILOT.md) and tick [PILOT_CHECKLIST.md](PILOT_CHECKLIST.md). Bundled sample: [`samples/match-engine/quench.yaml`](samples/match-engine/quench.yaml).
+On a Linux x86_64 host, start with [PILOT.md](PILOT.md) and tick [PILOT_CHECKLIST.md](PILOT_CHECKLIST.md). Bundled samples:
+
+- [`samples/match-engine/quench.yaml`](samples/match-engine/quench.yaml) — small order-book sample. A native LBR run measured a median regression and was **rejected**.
+- [`samples/opcode-vm/quench.yaml`](samples/opcode-vm/quench.yaml) — larger bytecode interpreter. Same 1% / 2% gates. It is a public technical sample, not a measured win, until a native run keeps the candidate.

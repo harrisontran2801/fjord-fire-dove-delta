@@ -113,6 +113,8 @@ The default measurement is 15 repetitions after 2 excluded warmup runs, using on
 
 Without `llvm-bolt`, a strip-only candidate is often rejected on the match-engine sample. That is the gate working.
 
+`samples/opcode-vm/quench.yaml` is a second public technical sample: a bytecode interpreter with indirect dispatch. It uses the same gates and the same 15 measured repetitions after 2 excluded warmup runs. Do not describe it as a speedup unless that host's report has `keptCandidate=true`. Match-engine's measured LBR run was a median regression and was rejected.
+
 ## Data that stays local
 
 - Binaries, configs, logs, and reports stay on this machine (`~/.quench` by default).
