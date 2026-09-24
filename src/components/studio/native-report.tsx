@@ -118,7 +118,21 @@ export function NativeFacts({ run }: { run: Run }) {
           label="Median / p95"
           value={`median ${fmtMs(n.medianMs?.baseline)} → ${fmtMs(n.medianMs?.candidate)} ms · p95 ${fmtMs(n.p95Ms?.baseline)} → ${fmtMs(n.p95Ms?.candidate)} ms`}
         />
-        <Fact label="Repetitions" value={n.benchmarkRepetitions != null ? String(n.benchmarkRepetitions) : "—"} />
+        <Fact
+          label="Repetitions"
+          value={
+            n.benchmarkRepetitions != null
+              ? `${n.benchmarkRepetitions} measured${n.benchmarkWarmup ? ` · ${n.benchmarkWarmup} warmup excluded` : ""}`
+              : "—"
+          }
+        />
+        {n.spreadMs ? (
+          <Fact
+            label="Spread"
+            value={`baseline ${fmtMs(n.spreadMs.baseline)} ms · candidate ${fmtMs(n.spreadMs.candidate)} ms`}
+          />
+        ) : null}
+        {n.stabilityWarning ? <Fact label="Stability" value={n.stabilityWarning} /> : null}
         {n.minImprovementPercent != null ? (
           <Fact
             label="Gates"
@@ -262,7 +276,21 @@ export function NativeReportArticle({ run }: { run: Run }) {
           value={`${fmtMs(n.medianMs?.baseline)} → ${fmtMs(n.medianMs?.candidate)}`}
         />
         <Fact label="p95 ms" value={`${fmtMs(n.p95Ms?.baseline)} → ${fmtMs(n.p95Ms?.candidate)}`} />
-        <Fact label="Repetitions" value={n.benchmarkRepetitions != null ? String(n.benchmarkRepetitions) : "—"} />
+        <Fact
+          label="Repetitions"
+          value={
+            n.benchmarkRepetitions != null
+              ? `${n.benchmarkRepetitions} measured${n.benchmarkWarmup ? ` · ${n.benchmarkWarmup} warmup excluded` : ""}`
+              : "—"
+          }
+        />
+        {n.spreadMs ? (
+          <Fact
+            label="Spread"
+            value={`baseline ${fmtMs(n.spreadMs.baseline)} ms · candidate ${fmtMs(n.spreadMs.candidate)} ms`}
+          />
+        ) : null}
+        {n.stabilityWarning ? <Fact label="Stability" value={n.stabilityWarning} /> : null}
         <Fact
           label="Gates"
           value={`min_improvement ${n.minImprovementPercent ?? "—"}% · max_regression ${n.maxRegressionPercent ?? "—"}%`}

@@ -20,6 +20,16 @@ pub struct BenchStats {
     pub median_ms: f64,
     pub p95_ms: f64,
     pub repetitions: usize,
+    #[serde(default)]
+    pub min_ms: f64,
+    #[serde(default)]
+    pub max_ms: f64,
+    #[serde(default)]
+    pub spread_ms: f64,
+    #[serde(default)]
+    pub stddev_ms: f64,
+    #[serde(default)]
+    pub warmup: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,11 +142,30 @@ pub fn stats_from_samples(mut samples: Vec<f64>) -> BenchStats {
     samples.retain(|s| s.is_finite() && *s >= 0.0);
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let repetitions = samples.len();
+    let min_ms = samples.first().copied().unwrap_or(0.0);
+    let max_ms = samples.last().copied().unwrap_or(0.0);
+    let mean = if repetitions == 0 {
+        0.0
+    } else {
+        samples.iter().sum::<f64>() / repetitions as f64
+    };
+    let stddev_ms = if repetitions < 2 {
+        0.0
+    } else {
+        let var =
+            samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / (repetitions as f64 - 1.0);
+        var.sqrt()
+    };
     BenchStats {
         median_ms: median(&samples),
         p95_ms: percentile(&samples, 95.0),
         repetitions,
         samples_ms: samples,
+        min_ms,
+        max_ms,
+        spread_ms: max_ms - min_ms,
+        stddev_ms,
+        warmup: 0,
     }
 }
 
@@ -226,15 +255,107 @@ fn record(run: &mut PipelineRun, rec: CommandRecord) -> &CommandRecord {
     run.commands.last().unwrap()
 }
 
+fn env_bounded(key: &str, fallback: u32, min: u32, max: u32) -> Result<usize, String> {
+    let n = match std::env::var(key) {
+        Ok(s) if !s.trim().is_empty() => s
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| format!("invalid {key}: {s}"))?,
+        _ => fallback,
+    };
+    if n < min || n > max {
+        return Err(format!("{key}={n} is outside {min}..={max}"));
+    }
+    Ok(n as usize)
+}
+
+fn bench_plan(cfg: &QuenchConfig) -> Result<(usize, usize), String> {
+    let repetitions = env_bounded("QUENCH_BENCH_REPETITIONS", cfg.benchmark_repetitions, 1, 30)?;
+    let warmup = env_bounded("QUENCH_BENCH_WARMUP", cfg.benchmark_warmup, 0, 10)?;
+    Ok((repetitions, warmup))
+}
+
+fn stability_warning(baseline: &BenchStats, candidate: Option<&BenchStats>) -> Option<String> {
+    let mut notes = Vec::new();
+    if baseline.repetitions < 10 {
+        notes.push(format!(
+            "only {} measured repetitions; p95 is less stable below 10",
+            baseline.repetitions
+        ));
+    }
+    let mut sides = vec![("baseline", baseline)];
+    if let Some(c) = candidate {
+        sides.push(("candidate", c));
+    }
+    for (name, stats) in sides {
+        if stats.median_ms > 0.0 {
+            let pct = (stats.spread_ms / stats.median_ms) * 100.0;
+            if pct > 5.0 {
+                notes.push(format!("{name} spread is {pct:.1}% of median"));
+            }
+        }
+    }
+    if notes.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "{}. This warning does not change the 1% / 2% gates.",
+            notes.join("; ")
+        ))
+    }
+}
+
+fn run_one_bench(
+    cfg: &QuenchConfig,
+    run: &mut PipelineRun,
+    binary: &Path,
+    cmd: &str,
+    stage: &str,
+) -> Result<f64, String> {
+    let rec = run_command(
+        cmd,
+        &cfg.project_root,
+        timeout(),
+        &[
+            ("QUENCH_BINARY", &binary.to_string_lossy()),
+            ("QUENCH_STAGE", stage),
+        ],
+        Some(binary),
+    );
+    if rec.exit_code != 0 {
+        let err = format!("benchmark command failed (exit {})", rec.exit_code);
+        record(run, rec);
+        return Err(err);
+    }
+    let elapsed = parse_elapsed_ms(&rec.stdout, rec.duration_ms);
+    record(run, rec);
+    Ok(elapsed)
+}
+
 fn run_bench(
     cfg: &QuenchConfig,
     run: &mut PipelineRun,
     run_dir: &Path,
     binary: &Path,
-    times: usize,
     stage: &str,
 ) -> Result<BenchStats, String> {
     let cmd = cfg.benchmark.clone().unwrap();
+    let (times, warmup) = bench_plan(cfg)?;
+    for i in 1..=warmup {
+        log_run(
+            run_dir,
+            run,
+            "benchmark",
+            &format!("{stage} warmup {i}/{warmup} (excluded)"),
+        );
+        let ms = run_one_bench(cfg, run, binary, &cmd, stage)?;
+        log_run(
+            run_dir,
+            run,
+            "benchmark",
+            &format!("{stage} warmup[{i}] elapsed_ms={ms:.4} excluded"),
+        );
+    }
     let mut samples = Vec::new();
     for i in 1..=times {
         log_run(
@@ -243,32 +364,18 @@ fn run_bench(
             "benchmark",
             &format!("{stage} repetition {i}/{times}"),
         );
-        let rec = run_command(
-            &cmd,
-            &cfg.project_root,
-            timeout(),
-            &[
-                ("QUENCH_BINARY", &binary.to_string_lossy()),
-                ("QUENCH_STAGE", stage),
-            ],
-            Some(binary),
-        );
-        if rec.exit_code != 0 {
-            let err = format!("benchmark command failed (exit {})", rec.exit_code);
-            record(run, rec);
-            return Err(err);
-        }
-        let ms = parse_elapsed_ms(&rec.stdout, rec.duration_ms);
+        let ms = run_one_bench(cfg, run, binary, &cmd, stage)?;
         samples.push(ms);
         log_run(
             run_dir,
             run,
             "benchmark",
-            &format!("{stage}[{i}] elapsed_ms={ms:.4} exit={}", rec.exit_code),
+            &format!("{stage}[{i}] elapsed_ms={ms:.4}"),
         );
-        record(run, rec);
     }
-    Ok(stats_from_samples(samples))
+    let mut stats = stats_from_samples(samples);
+    stats.warmup = warmup;
+    Ok(stats)
 }
 
 fn artifact_meta(path: &Path) -> Value {
@@ -594,7 +701,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         "Passed the supplied test suite (baseline)",
     );
 
-    let baseline_bench = match run_bench(cfg, &mut run, &run_dir, &baseline_copy, 3, "baseline") {
+    let baseline_bench = match run_bench(cfg, &mut run, &run_dir, &baseline_copy, "baseline") {
         Ok(s) => s,
         Err(e) => {
             run.status = RunStatus::Failed;
@@ -703,8 +810,14 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
                 "artifactSize": { "baselineBytes": baseline_size, "candidateBytes": Value::Null },
                 "testResult": "Passed the supplied test suite",
                 "benchmarkRepetitions": baseline_bench.repetitions,
+                "benchmarkWarmup": baseline_bench.warmup,
                 "medianMs": { "baseline": baseline_bench.median_ms, "candidate": Value::Null },
                 "p95Ms": { "baseline": baseline_bench.p95_ms, "candidate": Value::Null },
+                "minMs": { "baseline": baseline_bench.min_ms, "candidate": Value::Null },
+                "maxMs": { "baseline": baseline_bench.max_ms, "candidate": Value::Null },
+                "spreadMs": { "baseline": baseline_bench.spread_ms, "candidate": Value::Null },
+                "stdDevMs": { "baseline": baseline_bench.stddev_ms, "candidate": Value::Null },
+                "stabilityWarning": stability_warning(&baseline_bench, None),
                 "baseline": artifact_meta(&baseline_copy),
                 "runtime": { "baseline": baseline_bench, "candidate": Value::Null },
                 "minImprovementPercent": cfg.min_improvement_percent,
@@ -771,8 +884,7 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
         "Passed the supplied test suite",
     );
 
-    let candidate_bench = match run_bench(cfg, &mut run, &run_dir, &candidate_path, 3, "candidate")
-    {
+    let candidate_bench = match run_bench(cfg, &mut run, &run_dir, &candidate_path, "candidate") {
         Ok(s) => s,
         Err(e) => {
             run.status = RunStatus::Failed;
@@ -819,8 +931,14 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
                 "candidateSha256": candidate_sha,
                 "artifactSize": { "baselineBytes": baseline_size, "candidateBytes": candidate_size },
                 "benchmarkRepetitions": candidate_bench.repetitions,
+                "benchmarkWarmup": candidate_bench.warmup,
                 "medianMs": { "baseline": baseline_bench.median_ms, "candidate": candidate_bench.median_ms },
                 "p95Ms": { "baseline": baseline_bench.p95_ms, "candidate": candidate_bench.p95_ms },
+                "minMs": { "baseline": baseline_bench.min_ms, "candidate": candidate_bench.min_ms },
+                "maxMs": { "baseline": baseline_bench.max_ms, "candidate": candidate_bench.max_ms },
+                "spreadMs": { "baseline": baseline_bench.spread_ms, "candidate": candidate_bench.spread_ms },
+                "stdDevMs": { "baseline": baseline_bench.stddev_ms, "candidate": candidate_bench.stddev_ms },
+                "stabilityWarning": stability_warning(&baseline_bench, Some(&candidate_bench)),
                 "runtime": { "baseline": baseline_bench, "candidate": candidate_bench },
                 "minImprovementPercent": cfg.min_improvement_percent,
                 "maxRegressionPercent": cfg.max_regression_percent,
@@ -859,8 +977,14 @@ fn optimize_elf(cfg: &QuenchConfig) -> Result<PipelineRun, String> {
             "candidateSha256": candidate_sha,
             "artifactSize": { "baselineBytes": baseline_size, "candidateBytes": candidate_size },
             "benchmarkRepetitions": candidate_bench.repetitions,
+            "benchmarkWarmup": candidate_bench.warmup,
             "medianMs": { "baseline": baseline_bench.median_ms, "candidate": candidate_bench.median_ms },
             "p95Ms": { "baseline": baseline_bench.p95_ms, "candidate": candidate_bench.p95_ms },
+            "minMs": { "baseline": baseline_bench.min_ms, "candidate": candidate_bench.min_ms },
+            "maxMs": { "baseline": baseline_bench.max_ms, "candidate": candidate_bench.max_ms },
+            "spreadMs": { "baseline": baseline_bench.spread_ms, "candidate": candidate_bench.spread_ms },
+            "stdDevMs": { "baseline": baseline_bench.stddev_ms, "candidate": candidate_bench.stddev_ms },
+            "stabilityWarning": stability_warning(&baseline_bench, Some(&candidate_bench)),
             "runtime": { "baseline": baseline_bench, "candidate": candidate_bench },
             "baseline": artifact_meta(&baseline_copy),
             "candidate": artifact_meta(&candidate_path),
@@ -1252,6 +1376,8 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var("QUENCH_HOME", &home);
         std::env::set_var("QUENCH_CMD_TIMEOUT_SECS", "60");
+        std::env::set_var("QUENCH_BENCH_REPETITIONS", "3");
+        std::env::set_var("QUENCH_BENCH_WARMUP", "0");
         std::env::remove_var("QUENCH_FORCE_UNAVAILABLE");
         std::env::remove_var("QUENCH_FORCE_PROFILE_MODE");
         std::env::remove_var("QUENCH_FORCE_LBR");
@@ -1280,6 +1406,9 @@ mod tests {
         let c = stats_from_samples(vec![100.0, 100.0, 100.0, 100.0, 130.0]);
         let reason = should_discard_regression(&b, &c, 2.0).expect("p95");
         assert!(reason.contains("p95"));
+        assert_eq!(c.spread_ms, 30.0);
+        assert_eq!(c.min_ms, 100.0);
+        assert_eq!(c.max_ms, 130.0);
     }
 
     #[test]
@@ -1329,6 +1458,45 @@ mod tests {
             run.report["testResult"].as_str().unwrap(),
             "Passed the supplied test suite"
         );
+        let warning = run.report["stabilityWarning"].as_str().unwrap_or("");
+        assert!(warning.contains("does not change"), "warning={warning}");
+        assert_eq!(run.report["keptCandidate"], false);
+    }
+
+    #[test]
+    fn warmup_is_excluded_and_repetitions_are_configurable() {
+        let (root, _home, _guard) = setup_fixture("success");
+        std::env::set_var("QUENCH_BENCH_REPETITIONS", "4");
+        std::env::set_var("QUENCH_BENCH_WARMUP", "2");
+        let cfg = load_config(&root.join("quench.yaml")).unwrap();
+        let run = optimize(&cfg).expect("optimize");
+        assert_core_native_report(&run);
+        assert_eq!(run.report["benchmarkRepetitions"], 4);
+        assert_eq!(run.report["benchmarkWarmup"], 2);
+        assert_eq!(
+            run.report["benchmarkCommand"].as_str(),
+            cfg.benchmark.as_deref()
+        );
+        let logs = run.logs.join("\n");
+        assert!(logs.contains("baseline warmup 1/2 (excluded)"), "{logs}");
+        assert!(logs.contains("baseline repetition 4/4"), "{logs}");
+        assert!(logs.contains("candidate repetition 4/4"), "{logs}");
+        let samples = run.report["runtime"]["baseline"]["samples_ms"]
+            .as_array()
+            .expect("baseline samples");
+        assert_eq!(samples.len(), 4);
+        let bench_cmds: Vec<_> = run
+            .commands
+            .iter()
+            .filter(|c| c.command.contains("bench.sh"))
+            .collect();
+        assert_eq!(bench_cmds.len(), 12, "2 warmup + 4 measured, twice");
+        assert!(bench_cmds
+            .iter()
+            .all(|c| c.command == bench_cmds[0].command));
+        assert_eq!(run.report["benchmarkedInstrumented"], false);
+        assert_eq!(run.report["minImprovementPercent"], 1.0);
+        assert_eq!(run.report["maxRegressionPercent"], 2.0);
     }
 
     #[test]

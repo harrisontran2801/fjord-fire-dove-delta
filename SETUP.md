@@ -45,6 +45,8 @@ Optional. Missing tools are recorded as **Unavailable**; the agent does not inve
 
 The instrumented copy is slower and is **never** the source of final median/p95 numbers. Instrumentation is not production-traffic sampling. GNU `strip` is skipped after `llvm-bolt` because it can break BOLT section layout. A fallback profile can still reject the candidate when gates fail. Do not treat a synthetic sample keep as commercial proof.
 
+Benchmarks use the same command for the baseline and the candidate. The default is **15 measured repetitions after 2 warmup runs**. Warmup timings are excluded from median, p95, min, max, and spread. Gates stay at 1% minimum median improvement and 2% maximum median or p95 regression. A wide spread is a stability warning only; it does not keep or reject a candidate by itself. Override with `benchmark_repetitions` / `benchmark_warmup` in `quench.yaml` (1–30 and 0–10) or `QUENCH_BENCH_REPETITIONS` / `QUENCH_BENCH_WARMUP`.
+
 ### Native run (match-engine)
 
 From the repository root:

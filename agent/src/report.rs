@@ -137,11 +137,19 @@ pub fn report_text(run: &PipelineRun) -> String {
         lines.push(format!("decision         {reason}"));
     }
     lines.push(format!(
-        "repetitions      {}",
+        "repetitions      {} measured, {} warmup excluded",
         r.get("benchmarkRepetitions")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        r.get("benchmarkWarmup")
             .and_then(|v| v.as_u64())
             .unwrap_or(0)
     ));
+    if let Some(w) = r.get("stabilityWarning").and_then(|v| v.as_str()) {
+        if !w.is_empty() {
+            lines.push(format!("stability        {w}"));
+        }
+    }
     lines.push("tools:".into());
     if let Some(obj) = r.get("toolVersions").and_then(|v| v.as_object()) {
         for (id, info) in obj {

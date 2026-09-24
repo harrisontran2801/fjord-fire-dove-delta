@@ -32,6 +32,8 @@ pub struct QuenchConfig {
     pub image: Option<String>,
     pub max_regression_percent: f64,
     pub min_improvement_percent: f64,
+    pub benchmark_repetitions: u32,
+    pub benchmark_warmup: u32,
     pub source_path: PathBuf,
     pub project_root: PathBuf,
 }
@@ -79,6 +81,26 @@ fn opt(map: &std::collections::BTreeMap<String, String>, key: &str) -> Option<St
         .filter(|s| !s.is_empty())
 }
 
+fn parse_u32(
+    map: &std::collections::BTreeMap<String, String>,
+    key: &str,
+    default: u32,
+    min: u32,
+    max: u32,
+) -> Result<u32, String> {
+    let n = match map.get(key) {
+        None => default,
+        Some(s) => s
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| format!("invalid number for `{key}`: {s}"))?,
+    };
+    if n < min || n > max {
+        return Err(format!("`{key}` must be between {min} and {max}"));
+    }
+    Ok(n)
+}
+
 fn parse_f64(
     map: &std::collections::BTreeMap<String, String>,
     key: &str,
@@ -122,6 +144,8 @@ pub fn parse_config_text(text: &str, source_path: &Path) -> Result<QuenchConfig,
         image: opt(&map, "image"),
         max_regression_percent: parse_f64(&map, "max_regression_percent", 2.0)?,
         min_improvement_percent: parse_f64(&map, "min_improvement_percent", 1.0)?,
+        benchmark_repetitions: parse_u32(&map, "benchmark_repetitions", 15, 1, 30)?,
+        benchmark_warmup: parse_u32(&map, "benchmark_warmup", 2, 0, 10)?,
         source_path: source_path.to_path_buf(),
         project_root,
     })
@@ -180,6 +204,8 @@ min_improvement_percent: 1
         assert_eq!(cfg.kind, ProjectKind::Elf);
         assert_eq!(cfg.binary.as_deref(), Some("./target/release/match-engine"));
         assert_eq!(cfg.max_regression_percent, 2.0);
+        assert_eq!(cfg.benchmark_repetitions, 15);
+        assert_eq!(cfg.benchmark_warmup, 2);
     }
 
     #[test]
@@ -201,5 +227,15 @@ min_improvement_percent: 1
         let err =
             parse_config_text("project: x\nkind: windows\n", Path::new("/tmp/q.yaml")).unwrap_err();
         assert!(err.contains("unsupported kind"), "{err}");
+    }
+
+    #[test]
+    fn benchmark_repetitions_reject_out_of_range() {
+        let err = parse_config_text(
+            "project: x\nkind: elf\nbenchmark_repetitions: 0\n",
+            Path::new("/tmp/q.yaml"),
+        )
+        .unwrap_err();
+        assert!(err.contains("benchmark_repetitions"), "{err}");
     }
 }

@@ -95,7 +95,8 @@ A native report always includes:
 - baseline and candidate identity (SHA-256, paths, sizes)
 - the actual `build` / `test` / `profile` / `benchmark` commands
 - tool OK / Unavailable (rustc, cargo, strip, perf, llvm-bolt, …)
-- measured median (and p95) from the benchmark command
+- measured median, p95, min, max, and spread from the benchmark command
+- measured repetition count and how many warmup runs were excluded
 - `min_improvement_percent` and `max_regression_percent`
 - **kept** or **rejected**
 - `profileMode` (`lbr` | `instrument` | `nl` | `unavailable`) and the LBR/instrumentation reason
@@ -107,6 +108,8 @@ A candidate is **kept** only when:
 3. median and p95 do not exceed `max_regression_percent`.
 
 Otherwise the run is **failed** or **verification_failed**. Studio shows those as failures, not “complete”. Size-only changes without a runtime win are rejected. Missing `llvm-bolt` / `perf` are Unavailable, not fake speedups.
+
+The default measurement is 15 repetitions after 2 excluded warmup runs, using one benchmark command for both binaries. Fewer than 10 measured runs, or a spread wider than 5% of the median, is reported as a stability warning. That warning does not change the gates above.
 
 Without `llvm-bolt`, a strip-only candidate is often rejected on the match-engine sample. That is the gate working.
 

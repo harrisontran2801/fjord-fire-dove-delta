@@ -149,8 +149,14 @@ export interface NativeReport {
   artifactSize?: { baselineBytes?: number; candidateBytes?: number | null };
   testResult?: string | null;
   benchmarkRepetitions?: number;
+  benchmarkWarmup?: number;
   medianMs?: { baseline?: number; candidate?: number | null };
   p95Ms?: { baseline?: number; candidate?: number | null };
+  minMs?: { baseline?: number; candidate?: number | null };
+  maxMs?: { baseline?: number; candidate?: number | null };
+  spreadMs?: { baseline?: number; candidate?: number | null };
+  stdDevMs?: { baseline?: number; candidate?: number | null };
+  stabilityWarning?: string | null;
   transformsApplied?: { tool: string; status: string; detail: string }[];
   transformsFailed?: { tool: string; status: string; detail: string }[];
   reproducibleCommand?: string;

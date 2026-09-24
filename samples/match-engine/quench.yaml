@@ -7,3 +7,5 @@ benchmark: ./scripts/bench.sh
 profile: ./scripts/workload.sh
 max_regression_percent: 2
 min_improvement_percent: 1
+benchmark_repetitions: 15
+benchmark_warmup: 2
