@@ -925,7 +925,20 @@ fn collect_profile(
             detail: "llvm-bolt not found on PATH; no layout rewrite was performed".into(),
         });
         log_run(run_dir, run, "optimize", "llvm-bolt: Unavailable");
-        return;
+        // LBR collection does not need the bolt binary. Record the real perf
+        // command even when a later rewrite is impossible. Every other mode
+        // stops here, and a forced instrument mode must not stay "instrument".
+        if decision.mode != ProfileMode::Lbr {
+            if decision.mode == ProfileMode::Instrument {
+                run.profile.mode = ProfileMode::Unavailable;
+                run.profile.reason = if bolt_rt.is_none() {
+                    "libbolt_rt_instr.a missing".into()
+                } else {
+                    "llvm-bolt is Unavailable; instrumentation was not run".into()
+                };
+            }
+            return;
+        }
     }
 
     let Some(profile_cmd) = cfg.profile.clone() else {
